@@ -75,6 +75,8 @@ data NotEnoughColumns
     { _errColCount :: Int
     } deriving Show
 
+
+
 instance Exception NotEnoughColumns where
     displayException (NotEnoughColumns colCnt) =
         mconcat [ "Not enough columns while reading MySQL row. Only have "
@@ -237,20 +239,18 @@ mysqlUriSyntax =
                      ( "readTimeout", Just secs ) ->
                          ReadTimeout <$> readMaybe secs
                      ( "writeTimeout", Just secs ) ->
-                         WriteTimeout <$> readMaybe secs
-                     ( "useRemoteConnection", _ ) -> pure UseRemoteConnection
-                     ( "useEmbeddedConnection", _ ) -> pure UseEmbeddedConnection
-                     ( "guessConnection", _ ) -> pure GuessConnection
-                     ( "clientIp", Just fp) ->
-                         pure (ClientIP (BS.pack fp))
+                        WriteTimeout <$> readMaybe secs
+                     -- ( "useRemoteConnection", _ ) -> pure UseRemoteConnection
+                     -- ( "useEmbeddedConnection", _ ) -> pure UseEmbeddedConnection
+                     -- ( "guessConnection", _ ) -> pure GuessConnection
+                     -- ( "clientIp", Just fp) -> pure (ClientIP (BS.pack fp))
                      ( "secureAuth", b ) ->
                          SecureAuth <$> parseBool b
                      ( "reportDataTruncation", b ) ->
                          ReportDataTruncation <$> parseBool b
                      ( "reconnect", b ) ->
                          Reconnect <$> parseBool b
-                     ( "sslVerifyServerCert", b) ->
-                         SSLVerifyServerCert <$> parseBool b
+                     -- ( "sslVerifyServerCert", b) -> SSLVerifyServerCert <$> parseBool b
                      ( "foundRows", _ ) -> pure FoundRows
                      ( "ignoreSIGPIPE", _ ) -> pure IgnoreSIGPIPE
                      ( "ignoreSpace", _ ) -> pure IgnoreSpace
