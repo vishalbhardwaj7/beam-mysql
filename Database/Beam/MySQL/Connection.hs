@@ -75,6 +75,8 @@ data NotEnoughColumns
     { _errColCount :: Int
     } deriving Show
 
+
+
 instance Exception NotEnoughColumns where
     displayException (NotEnoughColumns colCnt) =
         mconcat [ "Not enough columns while reading MySQL row. Only have "
@@ -117,40 +119,41 @@ instance MonadBeam MySQL MySQLM where
 
                     case fields of
                       [] -> pure Nothing
-                      _ -> let FromBackendRowM go = fromBackendRow
-                           in Just <$> runF go (\x _ _ -> pure x) step
-                                         0 (zip fieldDescs fields)
+                      _ -> do
+                        let FromBackendRowM go = fromBackendRow
+                        rowRes <- runF go (\x _ _ -> pure (Right x)) step
+                                    0 (zip fieldDescs fields)
+                        case rowRes of
+                          Left err -> throwIO err
+                          Right x -> pure (Just x)
 
                 parseField :: forall field. FromField field
                            => MySQL.Field -> Maybe BS.ByteString
-                           -> IO (Either ParseError field)
+                           -> IO (Either ColumnParseError field)
                 parseField ty d = runExceptT (fromField ty d)
 
-                step :: FromBackendRowF MySQL (Int -> [(MySQL.Field, Maybe BS.ByteString)] -> IO x)
-                     -> Int -> [(MySQL.Field, Maybe BS.ByteString)] -> IO x
+                step :: forall y
+                      . FromBackendRowF MySQL (Int -> [(MySQL.Field, Maybe BS.ByteString)] -> IO (Either BeamRowReadError y))
+                     -> Int -> [(MySQL.Field, Maybe BS.ByteString)] -> IO (Either BeamRowReadError y)
                 step (ParseOneField _) curCol [] =
-                    throwIO (NotEnoughColumns (curCol + 1))
+                    pure (Left (BeamRowReadError (Just curCol) (ColumnNotEnoughColumns curCol)))
                 step (ParseOneField next) curCol ((desc, field):fields) =
                     do d <- parseField desc field
                        case d of
-                         Left  e  -> throwIO e
+                         Left  e  -> pure (Left (BeamRowReadError (Just curCol) e))
                          Right d' -> next d' (curCol + 1) fields
-                step (PeekField next) curCol fields@((desc, field):_) =
-                    do d <- parseField desc field
-                       case d of
-                         Left {}  -> next Nothing curCol fields
-                         Right d' -> next (Just d') curCol fields
-                step (PeekField next) curCol [] =
-                    next Nothing curCol []
-                step (CheckNextNNull n next) curCol fields
-                    | n > length fields = next False curCol fields
-                    | otherwise =
-                        let areNull = all (isNothing . snd) (take n fields)
-                        in next areNull
-                                (if areNull then curCol + n else curCol)
-                                (if areNull then drop n fields else fields)
-                step (FailParseWith f) curCol _ =
-                  throwIO (CouldNotReadColumn curCol f)
+
+                step (Alt (FromBackendRowM a) (FromBackendRowM b) next) curCol cols =
+                    do aRes <- runF a (\x curCol' cols' -> pure (Right (next x curCol' cols'))) step curCol cols
+                       case aRes of
+                         Right next' -> next'
+                         Left aErr -> do
+                           bRes <- runF b (\x curCol' cols' -> pure (Right (next x curCol' cols'))) step curCol cols
+                           case bRes of
+                             Right next' -> next'
+                             Left _ -> pure (Left aErr)
+
+                step (FailParseWith err) _ _ = pure (Left err)
 
                 MySQLM doConsume = consume fetchRow'
 
@@ -236,20 +239,18 @@ mysqlUriSyntax =
                      ( "readTimeout", Just secs ) ->
                          ReadTimeout <$> readMaybe secs
                      ( "writeTimeout", Just secs ) ->
-                         WriteTimeout <$> readMaybe secs
-                     ( "useRemoteConnection", _ ) -> pure UseRemoteConnection
-                     ( "useEmbeddedConnection", _ ) -> pure UseEmbeddedConnection
-                     ( "guessConnection", _ ) -> pure GuessConnection
-                     ( "clientIp", Just fp) ->
-                         pure (ClientIP (BS.pack fp))
+                        WriteTimeout <$> readMaybe secs
+                     -- ( "useRemoteConnection", _ ) -> pure UseRemoteConnection
+                     -- ( "useEmbeddedConnection", _ ) -> pure UseEmbeddedConnection
+                     -- ( "guessConnection", _ ) -> pure GuessConnection
+                     -- ( "clientIp", Just fp) -> pure (ClientIP (BS.pack fp))
                      ( "secureAuth", b ) ->
                          SecureAuth <$> parseBool b
                      ( "reportDataTruncation", b ) ->
                          ReportDataTruncation <$> parseBool b
                      ( "reconnect", b ) ->
                          Reconnect <$> parseBool b
-                     ( "sslVerifyServerCert", b) ->
-                         SSLVerifyServerCert <$> parseBool b
+                     -- ( "sslVerifyServerCert", b) -> SSLVerifyServerCert <$> parseBool b
                      ( "foundRows", _ ) -> pure FoundRows
                      ( "ignoreSIGPIPE", _ ) -> pure IgnoreSIGPIPE
                      ( "ignoreSpace", _ ) -> pure IgnoreSpace
@@ -290,6 +291,7 @@ FROM_BACKEND_ROW(T.Text)
 FROM_BACKEND_ROW(TL.Text)
 FROM_BACKEND_ROW(LocalTime)
 FROM_BACKEND_ROW(A.Value)
+FROM_BACKEND_ROW(SqlNull)
 
 -- * Equality checks
 #define HAS_MYSQL_EQUALITY_CHECK(ty)                       \
