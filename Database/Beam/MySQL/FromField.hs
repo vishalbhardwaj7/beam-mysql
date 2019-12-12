@@ -21,6 +21,7 @@ import           Control.Monad.Except
 
 import qualified Data.Aeson as A (Value, eitherDecodeStrict)
 import           Data.Attoparsec.ByteString.Char8
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as SB
 import qualified Data.ByteString.Lazy.Char8 as LB
 import           Data.Char
@@ -35,7 +36,6 @@ import qualified Data.Text.Lazy as TL
 import           Data.Time
 import           Data.Typeable
 import           Data.Word
-
 import           Text.Printf
 
 type FieldParser a = ExceptT ColumnParseError IO a
@@ -44,7 +44,19 @@ class FromField a where
     fromField :: Field -> Maybe SB.ByteString -> FieldParser a
 
 instance FromField Bool where
-    fromField f d = (/= (0::Word8)) <$> fromField f d
+    fromField f Nothing     = unexpectedNull f ""
+    fromField f md@(Just d) = (/= 0) <$>
+        case fieldType f of
+          Tiny -> fromField f md
+          Bit  -> case parseBit d of
+            Left err -> conversionFailed f err
+            Right r  -> pure r
+          _    -> incompatibleTypes f ""
+      where
+        parseBit :: SB.ByteString -> Either String Word8
+        parseBit bs
+          | BS.null bs = Left  (   show bs)
+          | otherwise  = Right (BS.head bs)
 
 instance FromField Word where
     fromField = atto check64 decimal
@@ -274,6 +286,7 @@ checkText VarChar = True
 checkText VarString = True
 checkText String = True
 checkText Enum = True
+checkText Blob = True
 checkText _ = False
 
 doConvert :: Typeable a => (Type -> Bool)
