@@ -18,9 +18,9 @@ module Database.Beam.MySQL.Connection
 
 import           Database.Beam.MySQL.Syntax
 import           Database.Beam.MySQL.FromField
-
 import           Database.Beam.Backend
 import           Database.Beam.Backend.URI
+import qualified Database.Beam.Backend.SQL.BeamExtensions as Beam
 import           Database.Beam.Query
 import           Database.Beam.Query.SQL92
 
@@ -48,9 +48,8 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Lazy as TL
 import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
 import           Data.Word
-
+import           Data.Functor.Identity
 import           Network.URI
-
 import           Text.Read hiding (step)
 
 data MySQL = MySQL
@@ -137,6 +136,7 @@ instance MonadBeam MySQL MySQLM where
                      -> Int -> [(MySQL.Field, Maybe BS.ByteString)] -> IO (Either BeamRowReadError y)
                 step (ParseOneField _) curCol [] =
                     pure (Left (BeamRowReadError (Just curCol) (ColumnNotEnoughColumns curCol)))
+
                 step (ParseOneField next) curCol ((desc, field):fields) =
                     do d <- parseField desc field
                        case d of
@@ -323,3 +323,65 @@ HAS_MYSQL_EQUALITY_CHECK(LocalTime)
 
 instance HasQBuilder MySQL where
     buildSqlQuery = buildSql92Query' True
+
+
+-- https://dev.mysql.com/doc/refman/5.6/en/information-functions.html#function_last-insert-id
+--
+-- The ID that was generated is maintained in the server on a per-connection basis.
+-- This means that the value returned by the function to a given client is the first AUTO_INCREMENT value generated
+--   for most recent statement affecting an AUTO_INCREMENT column by that client.
+-- This value cannot be affected by other clients,
+--   even if they generate AUTO_INCREMENT values of their own.
+-- This behavior ensures that each client can retrieve its own ID without concern for the activity of other clients,
+--   and without the need for locks or transactions.
+
+-- https://dev.mysql.com/doc/refman/8.0/en/create-temporary-table.html
+--
+-- A TEMPORARY table is visible only within the current session, and is dropped automatically when the session is closed.
+-- This means that two different sessions can use the same temporary table name without conflicting with each other
+--   or with an existing non-TEMPORARY table of the same name.
+-- (The existing table is hidden until the temporary table is dropped.)
+
+runInsertReturningList
+  :: FromBackendRow MySQL (table Identity)
+  => SqlInsert MySQL table
+  -> MySQLM [ table Identity ]
+runInsertReturningList SqlInsertNoRows = pure []
+runInsertReturningList (SqlInsert _ (MysqlInsertSyntax tn@(MysqlTableNameSyntax shema table) fields values)) = do
+  let tableB  = emit $ TE.encodeUtf8Builder $ table
+  let schemaB = emit $ TE.encodeUtf8Builder $ maybe "DATABASE()" (\s -> "'" <> s <> "'") shema
+
+  aicol <- fmap (fromMaybe $ error "undecidable auto_increment column") $ runReturningOne $ MysqlCommandSyntax $
+    emit "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
+    emit "`table_schema`=" <> schemaB <> emit " AND `table_name`='" <> tableB <>
+    emit "' AND `extra` LIKE 'auto_increment'"
+
+  case values of
+      MysqlInsertSelectSyntax _    -> error "Not implemented runInsertReturningList part handling: INSERT INTO .. SELECT .."
+      MysqlInsertValuesSyntax vals -> do
+          let tempTableName = emit "`_insert_returning_implementation`"
+
+          runNoReturn $ MysqlCommandSyntax $
+            emit "DROP TABLE IF EXISTS " <> tempTableName
+
+          runNoReturn $ MysqlCommandSyntax $
+            emit "CREATE TEMPORARY TABLE " <> tempTableName <> emit " SELECT * FROM " <> fromMysqlTableName tn <> emit " LIMIT 0"
+
+          flip mapM_ vals $ \val -> do
+            runNoReturn $ MysqlCommandSyntax $
+              fromMysqlInsert $ MysqlInsertSyntax tn fields (MysqlInsertValuesSyntax [val])
+
+            runNoReturn $ MysqlCommandSyntax $
+              emit "INSERT INTO " <> tempTableName <> emit " SELECT * FROM " <> fromMysqlTableName tn <>
+              emit " WHERE `" <> emit (TE.encodeUtf8Builder aicol) <> emit "`=LAST_INSERT_ID()"
+
+          res <- runReturningList $ MysqlCommandSyntax $
+            emit "SELECT * FROM " <> tempTableName
+
+          runNoReturn $ MysqlCommandSyntax $
+            emit "DROP TABLE " <> tempTableName
+
+          pure res
+
+instance Beam.MonadBeamInsertReturning MySQL MySQLM where
+  runInsertReturningList = runInsertReturningList
