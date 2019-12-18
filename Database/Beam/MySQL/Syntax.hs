@@ -6,7 +6,7 @@ module Database.Beam.MySQL.Syntax where
 import           Database.Beam.Backend.SQL
 import           Database.Beam.Query
 
-import           Database.MySQL.Base (Connection)
+-- import           Database.MySQL.Base (Connection)
 
 import qualified Data.Aeson as A (Value, encode)
 import           Data.ByteString (ByteString)
@@ -26,26 +26,58 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Lazy as TL
 import           Data.Time
 import           Data.Word
+import           Data.Functor.Identity
+
+
+data MysqlInsertSyntax = MysqlInsertSyntax MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
+data MysqlTableNameSyntax = MysqlTableNameSyntax (Maybe Text) Text
+
+data MysqlInsertValuesSyntax
+  = MysqlInsertValuesSyntax [[MysqlExpressionSyntax]]
+  | MysqlInsertSelectSyntax MysqlSelectSyntax
+
+
+fromMysqlInsertValues :: MysqlInsertValuesSyntax -> MysqlSyntax
+fromMysqlInsertValues (MysqlInsertSelectSyntax a)  = fromMysqlSelect a
+fromMysqlInsertValues (MysqlInsertValuesSyntax es) =
+    emit "VALUES " <>
+    mysqlSepBy (emit ", ")
+               (map (\es' -> emit "(" <>
+                             mysqlSepBy (emit ", ")
+                                        (fmap fromMysqlExpression es') <>
+                            emit ")")
+                    es)
+
+fromMysqlInsert :: MysqlInsertSyntax -> MysqlSyntax
+fromMysqlInsert (MysqlInsertSyntax tblName fields values) =
+    emit "INSERT INTO " <> fromMysqlTableName tblName <> emit "(" <>
+    mysqlSepBy (emit ", ") (map mysqlIdentifier fields) <> emit ") " <>
+    fromMysqlInsertValues values
+
+fromMysqlTableName :: MysqlTableNameSyntax -> MysqlSyntax
+fromMysqlTableName (MysqlTableNameSyntax s t) =
+    case s of
+      Nothing -> mysqlIdentifier t
+      Just s' -> mysqlIdentifier s' <> emit "." <> mysqlIdentifier t
+
 
 newtype MysqlSyntax
     = MysqlSyntax
-    { fromMysqlSyntax :: forall m. Monad m
-                      => ((ByteString -> m ByteString) ->
-                          Builder -> Connection -> m Builder)
-                      -> (ByteString -> m ByteString)
-                      -> Builder -> Connection -> m Builder
+    { fromMysqlSyntax :: forall m c. Monad m
+                      => ((ByteString -> m ByteString) -> Builder -> c -> m Builder)
+                      ->  (ByteString -> m ByteString) -> Builder -> c -> m Builder
     }
+
+unwrapInnerBuilder :: MysqlSyntax -> Builder
+unwrapInnerBuilder s = runIdentity $ fromMysqlSyntax s (\_ b _ -> pure b) pure "" ()
 
 newtype MysqlCommandSyntax = MysqlCommandSyntax { fromMysqlCommand :: MysqlSyntax }
 newtype MysqlSelectSyntax = MysqlSelectSyntax { fromMysqlSelect :: MysqlSyntax }
-newtype MysqlInsertSyntax = MysqlInsertSyntax { fromMysqlInsert :: MysqlSyntax }
 newtype MysqlUpdateSyntax = MysqlUpdateSyntax { fromMysqlUpdate :: MysqlSyntax }
 newtype MysqlDeleteSyntax = MysqlDeleteSyntax { fromMysqlDelete :: MysqlSyntax }
-newtype MysqlTableNameSyntax = MysqlTableNameSyntax { fromMysqlTableName :: MysqlSyntax }
 newtype MysqlFieldNameSyntax = MysqlFieldNameSyntax { fromMysqlFieldName :: MysqlSyntax }
 newtype MysqlExpressionSyntax = MysqlExpressionSyntax { fromMysqlExpression :: MysqlSyntax } deriving Eq
 newtype MysqlValueSyntax = MysqlValueSyntax { fromMysqlValue :: MysqlSyntax }
-newtype MysqlInsertValuesSyntax = MysqlInsertValuesSyntax { fromMysqlInsertValues :: MysqlSyntax }
 newtype MysqlSelectTableSyntax = MysqlSelectTableSyntax { fromMysqlSelectTable :: MysqlSyntax }
 newtype MysqlSetQuantifierSyntax = MysqlSetQuantifierSyntax { fromMysqlSetQuantifier :: MysqlSyntax }
 newtype MysqlComparisonQuantifierSyntax = MysqlComparisonQuantifierSyntax { fromMysqlComparisonQuantifier :: MysqlSyntax }
@@ -54,9 +86,11 @@ newtype MysqlFromSyntax = MysqlFromSyntax { fromMysqlFrom :: MysqlSyntax }
 newtype MysqlGroupingSyntax = MysqlGroupingSyntax { fromMysqlGrouping :: MysqlSyntax }
 newtype MysqlTableSourceSyntax = MysqlTableSourceSyntax { fromMysqlTableSource :: MysqlSyntax }
 newtype MysqlProjectionSyntax = MysqlProjectionSyntax { fromMysqlProjection :: MysqlSyntax }
+
 data MysqlDataTypeSyntax
   = MysqlDataTypeSyntax { fromMysqlDataType :: MysqlSyntax
                         , fromMysqlDataTypeCast :: MysqlSyntax }
+
 newtype MysqlExtractFieldSyntax = MysqlExtractFieldSyntax { fromMysqlExtractField :: MysqlSyntax }
 
 instance Eq MysqlSyntax where
@@ -123,29 +157,18 @@ instance IsSql92UpdateSyntax MysqlUpdateSyntax where
       maybe mempty (\where' -> emit " WHERE " <> fromMysqlExpression where') where_
 
 instance IsSql92InsertSyntax MysqlInsertSyntax where
-    type Sql92InsertValuesSyntax MysqlInsertSyntax = MysqlInsertValuesSyntax
+    type Sql92InsertValuesSyntax MysqlInsertSyntax    = MysqlInsertValuesSyntax
     type Sql92InsertTableNameSyntax MysqlInsertSyntax = MysqlTableNameSyntax
 
-    insertStmt tblName fields values =
-      MysqlInsertSyntax $
-      emit "INSERT INTO " <> fromMysqlTableName tblName <> emit "(" <>
-      mysqlSepBy (emit ", ") (map mysqlIdentifier fields) <> emit ")" <>
-      fromMysqlInsertValues values
+    insertStmt = MysqlInsertSyntax
+
 
 instance IsSql92InsertValuesSyntax MysqlInsertValuesSyntax where
     type Sql92InsertValuesExpressionSyntax MysqlInsertValuesSyntax = MysqlExpressionSyntax
-    type Sql92InsertValuesSelectSyntax MysqlInsertValuesSyntax = MysqlSelectSyntax
+    type Sql92InsertValuesSelectSyntax     MysqlInsertValuesSyntax = MysqlSelectSyntax
 
-    insertSqlExpressions es =
-        MysqlInsertValuesSyntax $
-        emit "VALUES " <>
-        mysqlSepBy (emit ", ")
-                   (map (\es' -> emit "(" <>
-                                 mysqlSepBy (emit ", ")
-                                            (fmap fromMysqlExpression es') <>
-                                emit ")")
-                        es)
-    insertFromSql a = MysqlInsertValuesSyntax (fromMysqlSelect a)
+    insertSqlExpressions = MysqlInsertValuesSyntax
+    insertFromSql        = MysqlInsertSelectSyntax
 
 instance IsSql92DeleteSyntax MysqlDeleteSyntax where
     type Sql92DeleteExpressionSyntax MysqlDeleteSyntax = MysqlExpressionSyntax
@@ -263,9 +286,9 @@ instance IsSql92OrderingSyntax MysqlOrderingSyntax where
     ascOrdering e = MysqlOrderingSyntax (fromMysqlExpression e <> emit " ASC")
     descOrdering e = MysqlOrderingSyntax (fromMysqlExpression e <> emit " DESC")
 
+
 instance IsSql92TableNameSyntax MysqlTableNameSyntax where
-  tableName Nothing t = MysqlTableNameSyntax $ mysqlIdentifier t
-  tableName (Just schema) t = MysqlTableNameSyntax $ mysqlIdentifier schema <> emit "." <> mysqlIdentifier t
+  tableName = MysqlTableNameSyntax
 
 instance IsSql92FieldNameSyntax MysqlFieldNameSyntax where
     qualifiedField a b =
@@ -594,3 +617,4 @@ mysqlNumPrec (Just (d, Just n)) = mysqlParens (emit (fromString (show d)) <> emi
 mysqlOptCharSet :: Maybe T.Text -> MysqlSyntax
 mysqlOptCharSet Nothing = mempty
 mysqlOptCharSet (Just cs) = emit " CHARACTER SET " <> mysqlIdentifier cs
+
