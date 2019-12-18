@@ -6,7 +6,7 @@ module Database.Beam.MySQL.Syntax where
 import           Database.Beam.Backend.SQL
 import           Database.Beam.Query
 
-import           Database.MySQL.Base (Connection)
+-- import           Database.MySQL.Base (Connection)
 
 import qualified Data.Aeson as A (Value, encode)
 import           Data.ByteString (ByteString)
@@ -26,6 +26,7 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Lazy as TL
 import           Data.Time
 import           Data.Word
+import           Data.Functor.Identity
 
 
 data MysqlInsertSyntax = MysqlInsertSyntax MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
@@ -62,10 +63,13 @@ fromMysqlTableName (MysqlTableNameSyntax s t) =
 
 newtype MysqlSyntax
     = MysqlSyntax
-    { fromMysqlSyntax :: forall m. Monad m
-                      => ((ByteString -> m ByteString) -> Builder -> Connection -> m Builder)
-                      ->  (ByteString -> m ByteString) -> Builder -> Connection -> m Builder
+    { fromMysqlSyntax :: forall m c. Monad m
+                      => ((ByteString -> m ByteString) -> Builder -> c -> m Builder)
+                      ->  (ByteString -> m ByteString) -> Builder -> c -> m Builder
     }
+
+unwrapInnerBuilder :: MysqlSyntax -> Builder
+unwrapInnerBuilder s = runIdentity $ fromMysqlSyntax s (\_ b _ -> pure b) pure "" ()
 
 newtype MysqlCommandSyntax = MysqlCommandSyntax { fromMysqlCommand :: MysqlSyntax }
 newtype MysqlSelectSyntax = MysqlSelectSyntax { fromMysqlSelect :: MysqlSyntax }

@@ -347,41 +347,73 @@ runInsertReturningList
   => SqlInsert MySQL table
   -> MySQLM [ table Identity ]
 runInsertReturningList SqlInsertNoRows = pure []
-runInsertReturningList (SqlInsert _ (MysqlInsertSyntax tn@(MysqlTableNameSyntax shema table) fields values)) = do
-  let tableB  = emit $ TE.encodeUtf8Builder $ table
-  let schemaB = emit $ TE.encodeUtf8Builder $ maybe "DATABASE()" (\s -> "'" <> s <> "'") shema
-
-  aicol <- fmap (fromMaybe $ error "undecidable auto_increment column") $ runReturningOne $ MysqlCommandSyntax $
-    emit "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
-    emit "`table_schema`=" <> schemaB <> emit " AND `table_name`='" <> tableB <>
-    emit "' AND `extra` LIKE 'auto_increment'"
-
+runInsertReturningList (SqlInsert _ is@(MysqlInsertSyntax tn@(MysqlTableNameSyntax shema table) fields values)) =
   case values of
-      MysqlInsertSelectSyntax _    -> error "Not implemented runInsertReturningList part handling: INSERT INTO .. SELECT .."
-      MysqlInsertValuesSyntax vals -> do
-          let tempTableName = emit "`_insert_returning_implementation`"
+    MysqlInsertSelectSyntax _    -> fail "Not implemented runInsertReturningList part handling: INSERT INTO .. SELECT .."
+    MysqlInsertValuesSyntax vals -> do
 
-          runNoReturn $ MysqlCommandSyntax $
-            emit "DROP TABLE IF EXISTS " <> tempTableName
+      let tableB  = emit $ TE.encodeUtf8Builder $ table
+      let schemaB = emit $ TE.encodeUtf8Builder $ maybe "DATABASE()" (\s -> "'" <> s <> "'") shema
 
-          runNoReturn $ MysqlCommandSyntax $
-            emit "CREATE TEMPORARY TABLE " <> tempTableName <> emit " SELECT * FROM " <> fromMysqlTableName tn <> emit " LIMIT 0"
+      (keycols :: [T.Text]) <- runReturningList $ MysqlCommandSyntax $
+        emit "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
+        emit "`table_schema`=" <> schemaB <> emit " AND `table_name`='" <> tableB <>
+        emit "' AND `column_key` LIKE 'PRI'"
 
-          flip mapM_ vals $ \val -> do
+      let pk = intersect keycols fields
+
+      when (null pk) $ fail "Table PK is not part of beam-table. Tables with no PK not allowed."
+
+      (aicol :: Maybe T.Text) <- runReturningOne $ MysqlCommandSyntax $
+        emit "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
+        emit "`table_schema`=" <> schemaB <> emit " AND `table_name`='" <> tableB <>
+        emit "' AND `extra` LIKE 'auto_increment'"
+
+      let equalTo :: (T.Text, MysqlExpressionSyntax) -> MysqlSyntax
+          equalTo (f, v) = emit ("`" <> TE.encodeUtf8Builder f <> "`=") <> fromMysqlExpression v
+
+      let fast = do
+            runNoReturn $ MysqlCommandSyntax $ fromMysqlInsert is
+
+            runReturningList $ MysqlCommandSyntax $ emit "SELECT * FROM " <> fromMysqlTableName tn <> emit " WHERE " <>
+              mysqlSepBy (emit " OR ") (mysqlSepBy (emit " AND ") . fmap equalTo . filter (flip elem pk . fst) . zip fields <$> vals)
+
+      case aicol of
+        Nothing -> fast -- no AI we can use PK to select inserted rows.
+        Just ai -> if not $ elem ai pk
+          then fast     -- AI exists and not part of PK, so we don't care about it
+          else do       -- AI exists and is part of PK
+            let tempTableName = emit "`_insert_returning_implementation`"
+
             runNoReturn $ MysqlCommandSyntax $
-              fromMysqlInsert $ MysqlInsertSyntax tn fields (MysqlInsertValuesSyntax [val])
+              emit "DROP TABLE IF EXISTS " <> tempTableName
 
             runNoReturn $ MysqlCommandSyntax $
-              emit "INSERT INTO " <> tempTableName <> emit " SELECT * FROM " <> fromMysqlTableName tn <>
-              emit " WHERE `" <> emit (TE.encodeUtf8Builder aicol) <> emit "`=LAST_INSERT_ID()"
+              emit "CREATE TEMPORARY TABLE " <> tempTableName <> emit " SELECT * FROM " <> fromMysqlTableName tn <> emit " LIMIT 0"
 
-          res <- runReturningList $ MysqlCommandSyntax $
-            emit "SELECT * FROM " <> tempTableName
+            flip mapM_ vals $ \val -> do
+              runNoReturn $ MysqlCommandSyntax $
+                fromMysqlInsert $ MysqlInsertSyntax tn fields (MysqlInsertValuesSyntax [val])
 
-          runNoReturn $ MysqlCommandSyntax $
-            emit "DROP TABLE " <> tempTableName
+              -- hacky. But is there any other way to figure out if AI field is set to some value, or DEFAULT?
+              let compareMysqlExporessions a b =
+                    (toLazyByteString $ unwrapInnerBuilder $ fromMysqlExpression a) ==
+                    (toLazyByteString $ unwrapInnerBuilder $ fromMysqlExpression b)
 
-          pure res
+              let go (f, v) = (f, if f == ai && compareMysqlExporessions v defaultE then MysqlExpressionSyntax $ emit "LAST_INSERT_ID()" else v)
+
+              runNoReturn $ MysqlCommandSyntax $
+                emit "INSERT INTO " <> tempTableName <> emit " SELECT * FROM " <> fromMysqlTableName tn <>
+                emit " WHERE " <> (mysqlSepBy (emit " AND ") $ fmap equalTo $ filter (flip elem pk . fst) $ map go $ zip fields val)
+
+            res <- runReturningList $ MysqlCommandSyntax $
+              emit "SELECT * FROM " <> tempTableName
+
+            runNoReturn $ MysqlCommandSyntax $
+              emit "DROP TABLE " <> tempTableName
+
+            pure res
+
 
 instance Beam.MonadBeamInsertReturning MySQL MySQLM where
   runInsertReturningList = runInsertReturningList
