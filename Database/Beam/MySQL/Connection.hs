@@ -370,12 +370,17 @@ runInsertReturningList (SqlInsert _ is@(MysqlInsertSyntax tn@(MysqlTableNameSynt
         emit "' AND `extra` LIKE 'auto_increment'"
 
       let equalTo :: (T.Text, MysqlExpressionSyntax) -> MysqlSyntax
-          equalTo (f, v) = emit ("`" <> TE.encodeUtf8Builder f <> "`=") <> fromMysqlExpression v
+          equalTo (f, v) = mysqlIdentifier f <> emit "=" <> fromMysqlExpression v
+
+      let csfields = mysqlSepBy (emit ", ") $ fmap mysqlIdentifier fields
 
       let fast = do
             runNoReturn $ MysqlCommandSyntax $ fromMysqlInsert is
 
-            runReturningList $ MysqlCommandSyntax $ emit "SELECT * FROM " <> fromMysqlTableName tn <> emit " WHERE " <>
+            -- Select inserted rows by Primary Keys
+            -- Result can be totally wrong if some of (vals :: MysqlExpressionSyntax) can result in
+            -- different values when evaluated by db.
+            runReturningList $ MysqlCommandSyntax $ emit "SELECT " <> csfields <> emit " FROM " <> fromMysqlTableName tn <> emit " WHERE " <>
               mysqlSepBy (emit " OR ") (mysqlSepBy (emit " AND ") . fmap equalTo . filter (flip elem pk . fst) . zip fields <$> vals)
 
       case aicol of
@@ -389,25 +394,28 @@ runInsertReturningList (SqlInsert _ is@(MysqlInsertSyntax tn@(MysqlTableNameSynt
               emit "DROP TABLE IF EXISTS " <> tempTableName
 
             runNoReturn $ MysqlCommandSyntax $
-              emit "CREATE TEMPORARY TABLE " <> tempTableName <> emit " SELECT * FROM " <> fromMysqlTableName tn <> emit " LIMIT 0"
+              emit "CREATE TEMPORARY TABLE " <> tempTableName <> emit " SELECT " <> csfields <> emit " FROM " <> fromMysqlTableName tn <> emit " LIMIT 0"
 
             flip mapM_ vals $ \val -> do
               runNoReturn $ MysqlCommandSyntax $
                 fromMysqlInsert $ MysqlInsertSyntax tn fields (MysqlInsertValuesSyntax [val])
 
-              -- hacky. But is there any other way to figure out if AI field is set to some value, or DEFAULT?
+              -- hacky. But is there any other way to figure out if AI field is set to some value, or DEFAULT, for example?
               let compareMysqlExporessions a b =
                     (toLazyByteString $ unwrapInnerBuilder $ fromMysqlExpression a) ==
                     (toLazyByteString $ unwrapInnerBuilder $ fromMysqlExpression b)
 
               let go (f, v) = (f, if f == ai && compareMysqlExporessions v defaultE then MysqlExpressionSyntax $ emit "LAST_INSERT_ID()" else v)
 
+              -- Select inserted rows by Primary Keys
+              -- Result can be totally wrong if some of (vals :: MysqlExpressionSyntax) can result in
+              -- different values when evaluated by db.
               runNoReturn $ MysqlCommandSyntax $
-                emit "INSERT INTO " <> tempTableName <> emit " SELECT * FROM " <> fromMysqlTableName tn <>
+                emit "INSERT INTO " <> tempTableName <> emit " SELECT " <> csfields <> emit " FROM " <> fromMysqlTableName tn <>
                 emit " WHERE " <> (mysqlSepBy (emit " AND ") $ fmap equalTo $ filter (flip elem pk . fst) $ map go $ zip fields val)
 
             res <- runReturningList $ MysqlCommandSyntax $
-              emit "SELECT * FROM " <> tempTableName
+              emit "SELECT " <> csfields <> emit " FROM " <> tempTableName
 
             runNoReturn $ MysqlCommandSyntax $
               emit "DROP TABLE " <> tempTableName
