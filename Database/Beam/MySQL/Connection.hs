@@ -45,6 +45,7 @@ import           Data.Ratio
 import           Data.Scientific
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.Lazy as TL
 import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
 import           Data.Word
@@ -104,7 +105,7 @@ instance MonadBeam MySQL MySQLM where
           cmdBuilder <- cmd (\_ b _ -> pure b) (MySQL.escape conn) mempty conn
           let cmdStr = BL.toStrict (toLazyByteString cmdBuilder)
 
-          dbg (T.unpack (TE.decodeUtf8 cmdStr))
+          dbg (T.unpack (TE.decodeUtf8With TE.lenientDecode cmdStr))
 
           MySQL.query conn cmdStr
 
