@@ -393,7 +393,7 @@ runInsertReturningList (SqlInsert _ is@(MysqlInsertSyntax tn@(MysqlTableNameSynt
             let tempTableName = emit "`_insert_returning_implementation`"
 
             runNoReturn $ MysqlCommandSyntax $
-              emit "DROP TABLE IF EXISTS " <> tempTableName
+              emit "DROP TEMPORARY TABLE IF EXISTS " <> tempTableName
 
             runNoReturn $ MysqlCommandSyntax $
               emit "CREATE TEMPORARY TABLE " <> tempTableName <> emit " SELECT " <> csfields <> emit " FROM " <> fromMysqlTableName tn <> emit " LIMIT 0"
@@ -420,7 +420,7 @@ runInsertReturningList (SqlInsert _ is@(MysqlInsertSyntax tn@(MysqlTableNameSynt
               emit "SELECT " <> csfields <> emit " FROM " <> tempTableName
 
             runNoReturn $ MysqlCommandSyntax $
-              emit "DROP TABLE " <> tempTableName
+              emit "DROP TEMPORARY TABLE " <> tempTableName
 
             pure res
 
