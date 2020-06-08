@@ -13,3 +13,7 @@ extra-include-dirs:
 - /usr/local/opt/openssl/include
 extra-lib-dirs:
 - /usr/local/opt/openssl/lib
+
+nix:
+  enable: false
+  packages: [mysql57, openssl, zlib]
