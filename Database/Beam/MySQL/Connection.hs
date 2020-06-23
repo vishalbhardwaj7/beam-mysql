@@ -44,6 +44,7 @@ import           Data.List
 import           Data.Maybe
 import           Data.Ratio
 import           Data.Scientific
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TE
@@ -65,7 +66,7 @@ instance BeamBackend MySQL where
 instance BeamSqlBackend MySQL
 type instance BeamSqlBackendSyntax MySQL = MysqlCommandSyntax
 
-newtype MySQLM a = MySQLM (ReaderT (String -> IO (), Connection) IO a)
+newtype MySQLM a = MySQLM (ReaderT (Text -> IO (), Connection) IO a)
     deriving (Monad, MonadIO, Applicative, Functor)
 
 instance MonadFail MySQLM where
@@ -93,7 +94,7 @@ instance Exception CouldNotReadColumn where
   displayException (CouldNotReadColumn idx msg) =
     mconcat [ "Could not read column ", show idx, ": ", msg ]
 
-runBeamMySQLDebug :: (String -> IO ()) -> Connection -> MySQLM a -> IO a
+runBeamMySQLDebug :: (Text -> IO ()) -> Connection -> MySQLM a -> IO a
 runBeamMySQLDebug = withMySQL
 
 runBeamMySQL :: Connection -> MySQLM a -> IO a
@@ -106,7 +107,7 @@ instance MonadBeam MySQL MySQLM where
           cmdBuilder <- cmd (\_ b _ -> pure b) (MySQL.escape conn) mempty conn
           let cmdStr = BL.toStrict (toLazyByteString cmdBuilder)
 
-          dbg (T.unpack (TE.decodeUtf8With TE.lenientDecode cmdStr))
+          dbg (TE.decodeUtf8With TE.lenientDecode cmdStr)
 
           MySQL.query conn cmdStr
 
@@ -161,7 +162,7 @@ instance MonadBeam MySQL MySQLM where
 
             runReaderT doConsume (dbg, conn)
 
-withMySQL :: (String -> IO ()) -> Connection
+withMySQL :: (Text -> IO ()) -> Connection
           -> MySQLM a -> IO a
 withMySQL dbg conn (MySQLM a) =
     runReaderT a (dbg, conn)
