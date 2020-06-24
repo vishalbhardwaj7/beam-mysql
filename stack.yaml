@@ -2,7 +2,7 @@ resolver: lts-15.15
 
 extra-deps:
   - git: https://github.com/juspay/beam
-    commit: b626c85f4d86b0960359d8b99613a9a0439667a2
+    commit: f6a35d5361e96c766ae977e9a07fa40c6622808e
     subdirs:
       - beam-core
   - git: https://github.com/juspay/mysql-haskell

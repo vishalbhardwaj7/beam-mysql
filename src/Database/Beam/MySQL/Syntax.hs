@@ -1,5 +1,7 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP                        #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE TypeFamilies               #-}
 
 module Database.Beam.MySQL.Syntax where
 
@@ -8,25 +10,25 @@ import           Database.Beam.Query
 
 -- import           Database.MySQL.Base (Connection)
 
-import qualified Data.Aeson as A (Value, encode)
-import           Data.ByteString (ByteString)
+import qualified Data.Aeson                         as A (Value, encode)
+import           Data.ByteString                    (ByteString)
 import           Data.ByteString.Builder
 import           Data.ByteString.Builder.Scientific (scientificBuilder)
-import qualified Data.ByteString.Lazy as BL (toStrict)
+import qualified Data.ByteString.Lazy               as BL (toStrict)
 import           Data.Fixed
+import           Data.Functor.Identity
 import           Data.Int
-import           Data.Maybe (maybe)
-import           Data.Monoid (Monoid)
-import           Data.Scientific (Scientific)
-import           Data.Semigroup (Semigroup, (<>))
+import           Data.Maybe                         (maybe)
+import           Data.Monoid                        (Monoid)
+import           Data.Scientific                    (Scientific)
+import           Data.Semigroup                     (Semigroup, (<>))
 import           Data.String
-import           Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import qualified Data.Text.Lazy as TL
+import           Data.Text                          (Text)
+import qualified Data.Text                          as T
+import qualified Data.Text.Encoding                 as TE
+import qualified Data.Text.Lazy                     as TL
 import           Data.Time
 import           Data.Word
-import           Data.Functor.Identity
 
 
 data MysqlInsertSyntax = MysqlInsertSyntax MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
@@ -88,7 +90,7 @@ newtype MysqlTableSourceSyntax = MysqlTableSourceSyntax { fromMysqlTableSource :
 newtype MysqlProjectionSyntax = MysqlProjectionSyntax { fromMysqlProjection :: MysqlSyntax }
 
 data MysqlDataTypeSyntax
-  = MysqlDataTypeSyntax { fromMysqlDataType :: MysqlSyntax
+  = MysqlDataTypeSyntax { fromMysqlDataType     :: MysqlSyntax
                         , fromMysqlDataTypeCast :: MysqlSyntax }
 
 newtype MysqlExtractFieldSyntax = MysqlExtractFieldSyntax { fromMysqlExtractField :: MysqlSyntax }
@@ -122,8 +124,8 @@ mysqlIdentifier t =
     emit "`"
 
 mysqlSepBy :: MysqlSyntax -> [MysqlSyntax] -> MysqlSyntax
-mysqlSepBy _ [] = mempty
-mysqlSepBy _ [a] = a
+mysqlSepBy _ []       = mempty
+mysqlSepBy _ [a]      = a
 mysqlSepBy sep (a:as) = a <> foldMap (sep <>) as
 
 mysqlParens :: MysqlSyntax -> MysqlSyntax
@@ -600,7 +602,7 @@ instance HasSqlValueSyntax MysqlValueSyntax LocalTime where
                                                " " <> todBuilder (localTimeOfDay d) <> "'"))
 
 instance HasSqlValueSyntax MysqlValueSyntax x => HasSqlValueSyntax MysqlValueSyntax (Maybe x) where
-    sqlValueSyntax Nothing = sqlValueSyntax SqlNull
+    sqlValueSyntax Nothing  = sqlValueSyntax SqlNull
     sqlValueSyntax (Just x) = sqlValueSyntax x
 
 instance HasSqlValueSyntax MysqlValueSyntax A.Value where
@@ -615,5 +617,5 @@ mysqlNumPrec (Just (d, Nothing)) = mysqlParens (emit . fromString . show $ d)
 mysqlNumPrec (Just (d, Just n)) = mysqlParens (emit (fromString (show d)) <> emit ", " <> emit (fromString (show n)))
 
 mysqlOptCharSet :: Maybe T.Text -> MysqlSyntax
-mysqlOptCharSet Nothing = mempty
+mysqlOptCharSet Nothing   = mempty
 mysqlOptCharSet (Just cs) = emit " CHARACTER SET " <> mysqlIdentifier cs
