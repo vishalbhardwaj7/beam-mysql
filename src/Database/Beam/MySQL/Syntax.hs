@@ -1,14 +1,7 @@
-{-# LANGUAGE CPP                        #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE RankNTypes                 #-}
-{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE RankNTypes   #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Database.Beam.MySQL.Syntax where
-
-import           Database.Beam.Backend.SQL
-import           Database.Beam.Query
-
--- import           Database.MySQL.Base (Connection)
 
 import qualified Data.Aeson                         as A (Value, encode)
 import           Data.ByteString                    (ByteString)
@@ -18,10 +11,7 @@ import qualified Data.ByteString.Lazy               as BL (toStrict)
 import           Data.Fixed
 import           Data.Functor.Identity
 import           Data.Int
-import           Data.Maybe                         (maybe)
-import           Data.Monoid                        (Monoid)
 import           Data.Scientific                    (Scientific)
-import           Data.Semigroup                     (Semigroup, (<>))
 import           Data.String
 import           Data.Text                          (Text)
 import qualified Data.Text                          as T
@@ -29,7 +19,8 @@ import qualified Data.Text.Encoding                 as TE
 import qualified Data.Text.Lazy                     as TL
 import           Data.Time
 import           Data.Word
-
+import           Database.Beam.Backend.SQL
+import           Database.Beam.Query
 
 data MysqlInsertSyntax = MysqlInsertSyntax MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
 data MysqlTableNameSyntax = MysqlTableNameSyntax (Maybe Text) Text
@@ -37,7 +28,6 @@ data MysqlTableNameSyntax = MysqlTableNameSyntax (Maybe Text) Text
 data MysqlInsertValuesSyntax
   = MysqlInsertValuesSyntax [[MysqlExpressionSyntax]]
   | MysqlInsertSelectSyntax MysqlSelectSyntax
-
 
 fromMysqlInsertValues :: MysqlInsertValuesSyntax -> MysqlSyntax
 fromMysqlInsertValues (MysqlInsertSelectSyntax a)  = fromMysqlSelect a
@@ -61,7 +51,6 @@ fromMysqlTableName (MysqlTableNameSyntax s t) =
     case s of
       Nothing -> mysqlIdentifier t
       Just s' -> mysqlIdentifier s' <> emit "." <> mysqlIdentifier t
-
 
 newtype MysqlSyntax
     = MysqlSyntax
@@ -99,12 +88,10 @@ instance Eq MysqlSyntax where
     _ == _ = False
 
 instance Semigroup MysqlSyntax where
-    (<>) = mappend
+    MysqlSyntax x <> MysqlSyntax y = MysqlSyntax (x . y)
 
 instance Monoid MysqlSyntax where
     mempty = MysqlSyntax id
-    mappend (MysqlSyntax a) (MysqlSyntax b) =
-        MysqlSyntax $ \next -> a (b next)
 
 emit :: Builder -> MysqlSyntax
 emit b = MysqlSyntax (\next doEscape before -> next doEscape (before <> b))
@@ -217,10 +204,10 @@ instance IsSql92SelectTableSyntax MysqlSelectTableSyntax where
       emit "SELECT " <>
       maybe mempty (\sq' -> fromMysqlSetQuantifier sq' <> emit " ") setQuantifier <>
       fromMysqlProjection proj <>
-      maybe mempty (emit " FROM " <>) (fmap fromMysqlFrom from) <>
-      maybe mempty (emit " WHERE " <>) (fmap fromMysqlExpression where_) <>
-      maybe mempty (emit " GROUP BY " <>) (fmap fromMysqlGrouping grouping) <>
-      maybe mempty (emit " HAVING " <>) (fmap fromMysqlExpression having)
+      maybe mempty ((emit " FROM " <>) . fromMysqlFrom) from <>
+      maybe mempty ((emit " WHERE " <>) . fromMysqlExpression) where_ <>
+      maybe mempty ((emit " GROUP BY " <>) . fromMysqlGrouping) grouping <>
+      maybe mempty ((emit " HAVING " <>) . fromMysqlExpression) having
 
     unionTables True  = mysqlTblOp "UNION ALL"
     unionTables False = mysqlTblOp "UNION"
@@ -483,17 +470,6 @@ mysqlUnAgg fn q e =
     emit fn <> emit "(" <>
     maybe mempty (\q' -> fromMysqlSetQuantifier q' <> emit " ") q <>
     fromMysqlExpression e <> emit")"
-
--- Remove this dependence on Sql99ExpressionSyntax
-
--- instance IsSql2003EnhancedNumericFunctionsExpressionSyntax MysqlExpressionSyntax where
---     lnE    x = MysqlExpressionSyntax (emit "LN("    <> fromMysqlExpression x <> emit ")")
---     expE   x = MysqlExpressionSyntax (emit "EXP("   <> fromMysqlExpression x <> emit ")")
---     sqrtE  x = MysqlExpressionSyntax (emit "SQRT("  <> fromMysqlExpression x <> emit ")")
---     ceilE  x = MysqlExpressionSyntax (emit "CEIL("  <> fromMysqlExpression x <> emit ")")
---     floorE x = MysqlExpressionSyntax (emit "FLOOR(" <> fromMysqlExpression x <> emit ")")
---     powerE x y = MysqlExpressionSyntax (emit "POWER(" <> fromMysqlExpression x <> emit ", " <>
---                                         fromMysqlExpression y <> emit ")")
 
 instance IsSql92QuantifierSyntax MysqlComparisonQuantifierSyntax where
     quantifyOverAll = MysqlComparisonQuantifierSyntax (emit "ALL")

@@ -1,20 +1,16 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE CPP #-}
+
 module Database.Beam.MySQL.Connection
     ( MySQL(..), MySQL.Connection
     , MySQLM(..)
-
     , runBeamMySQL, runBeamMySQLDebug
-
     , MysqlCommandSyntax(..)
     , MysqlSelectSyntax(..), MysqlInsertSyntax(..)
     , MysqlUpdateSyntax(..), MysqlDeleteSyntax(..)
     , MysqlExpressionSyntax(..)
-
     , runInsertRowReturning
-
     , MySQL.connect, MySQL.close
-
     , mysqlUriSyntax ) where
 
 import           Database.Beam.MySQL.Syntax
@@ -24,9 +20,6 @@ import           Database.Beam.Backend.URI
 import qualified Database.Beam.Backend.SQL.BeamExtensions as Beam
 import           Database.Beam.Query
 import           Database.Beam.Query.SQL92
-
-import           Database.MySQL.Base as MySQL
-import qualified Database.MySQL.Base.Types as MySQL
 
 import           Control.Exception
 import           Control.Monad.Except
@@ -72,10 +65,10 @@ newtype MySQLM a = MySQLM (ReaderT (Text -> IO (), Connection) IO a)
 instance MonadFail MySQLM where
     fail e = fail $ "Internal Error with: " <> show e
 
-data NotEnoughColumns
+newtype NotEnoughColumns
     = NotEnoughColumns
     { _errColCount :: Int
-    } deriving Show
+    } deriving stock Show
 
 
 
@@ -183,8 +176,7 @@ mysqlUriSyntax =
                            pw'' = fromMaybe "" (stripPrefix ":" pw')
                        pure (user', pw'')
                  host =
-                     fromMaybe "localhost" .
-                     fmap uriRegName . uriAuthority $ uri
+                    maybe "localhost" uriRegName . uriAuthority $ uri
                  port =
                      fromMaybe 3306 $ do
                        portStr <- fmap uriPort (uriAuthority uri)
