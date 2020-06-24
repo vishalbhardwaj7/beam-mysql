@@ -1,6 +1,15 @@
 resolver: lts-15.15
+
 extra-deps:
-  - ../beam/beam-core
+  - git: https://github.com/juspay/beam
+    commit: b626c85f4d86b0960359d8b99613a9a0439667a2
+    subdirs:
+      - beam-core
+  - git: https://github.com/juspay/mysql-haskell
+    commit: 468c0757ab184fd905752b8e678a02f7f04809c4
+  # Needed for mysql-haskell
+  - tcp-streams-1.0.1.1@sha256:35e9ecfa515797052f8c3c01834d2daebd5e93f3152c7fc98b32652bf6f0c052,2329
+  - wire-streams-0.1.1.0@sha256:08816c7fa53b20f52e5c465252c106d9de8e6d9580ec0b6d9f000a34c7bcefc8,2130
 
 # Problem: MacOS build failure
 # >   Configuring mysql-0.1.7...
@@ -10,9 +19,9 @@ extra-deps:
 # https://github.com/depressed-pho/HsOpenSSL/issues/41
 # TODO: how to make it portable?
 extra-include-dirs:
-- /usr/local/opt/openssl/include
+  - /usr/local/opt/openssl/include
 extra-lib-dirs:
-- /usr/local/opt/openssl/lib
+  - /usr/local/opt/openssl/lib
 
 nix:
   enable: false
