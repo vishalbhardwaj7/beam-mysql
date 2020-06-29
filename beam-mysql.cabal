@@ -45,6 +45,19 @@ common common-lang
 
   default-language:   Haskell2010
 
+common common-bench
+  import:        common-lang
+  ghc-options:   -O2 -threaded -with-rtsopts=-N
+  build-depends:
+    , beam-mysql
+    , directory        ^>=1.3.6.0
+    , filepath         ^>=1.4.2.1
+    , mysql-haskell
+    , random           ^>=1.1
+    , safe-exceptions
+    , typed-process    ^>=0.2.6.0
+    , unix             ^>=2.7.2.2
+
 library
   import:          common-lang
   exposed-modules:
@@ -70,18 +83,17 @@ library
   hs-source-dirs:  src
 
 executable raw-insert-bench
-  import:         common-lang
+  import:         common-bench
+  main-is:        Main.hs
+  other-modules:  TmpMySQL
+  hs-source-dirs: bench bench/raw-insert
+
+executable beam-insert-bench
+  import:         common-bench
   main-is:        Main.hs
   other-modules:  TmpMySQL
   build-depends:
-    , beam-mysql
-    , directory        ^>=1.3.6.0
-    , filepath         ^>=1.4.2.1
-    , mysql-haskell
-    , random           ^>=1.1
-    , safe-exceptions
-    , typed-process    ^>=0.2.6.0
-    , unix             ^>=2.7.2.2
+    , beam-core
+    , text
 
-  ghc-options:    -O2 -threaded -with-rtsopts=-N
-  hs-source-dirs: bench bench/raw-insert
+  hs-source-dirs: bench bench/beam-insert
