@@ -109,8 +109,8 @@ tableOp op l r = l <> " " <> op <> " " <> r
 
 -- Combination of data type name and its casting
 data MysqlDataTypeSyntax = MysqlDataTypeSyntax {
-  _mysqlDataType :: {-# UNPACK #-} !MysqlSyntax,
-  mysqlTypeCast  :: {-# UNPACK #-} !MysqlSyntax
+  _mysqlDataType :: !MysqlSyntax,
+  mysqlTypeCast  :: !MysqlSyntax
   }
   deriving stock (Eq)
 

@@ -68,3 +68,20 @@ library
     , vector           ^>=0.12.1.2
 
   hs-source-dirs:  src
+
+executable raw-insert-bench
+  import:         common-lang
+  main-is:        Main.hs
+  other-modules:  TmpMySQL
+  build-depends:
+    , beam-mysql
+    , directory        ^>=1.3.6.0
+    , filepath         ^>=1.4.2.1
+    , mysql-haskell
+    , random           ^>=1.1
+    , safe-exceptions
+    , typed-process    ^>=0.2.6.0
+    , unix             ^>=2.7.2.2
+
+  ghc-options:    -O2 -threaded -with-rtsopts=-N
+  hs-source-dirs: bench bench/raw-insert

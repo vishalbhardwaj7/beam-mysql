@@ -20,3 +20,4 @@ TAGS
 .vscode
 .nvimrc
 stack.yaml.lock
+*.prof
