@@ -1,489 +1,322 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE TypeFamilies        #-}
 
-module Database.Beam.MySQL.Connection
-    ( MySQL(..), MySQL.Connection
-    , MySQLM(..)
-    , runBeamMySQL, runBeamMySQLDebug
-    , MysqlCommandSyntax(..)
-    , MysqlSelectSyntax(..), MysqlInsertSyntax(..)
-    , MysqlUpdateSyntax(..), MysqlDeleteSyntax(..)
-    , MysqlExpressionSyntax(..)
-    , runInsertRowReturning
-    , MySQL.connect, MySQL.close
-    , mysqlUriSyntax ) where
+module Database.Beam.MySQL.Connection (
+  MySQL(..),
+  MySQLM(..),
+  NotEnoughColumns (..),
+  CouldNotReadColumn (..),
+  runBeamMySQL, runBeamMySQLDebug
+  ) where
 
-import           Database.Beam.MySQL.Syntax
-import           Database.Beam.MySQL.FromField
-import           Database.Beam.Backend
-import           Database.Beam.Backend.URI
-import qualified Database.Beam.Backend.SQL.BeamExtensions as Beam
-import           Database.Beam.Query
-import           Database.Beam.Query.SQL92
-
-import           Control.Exception
-import           Control.Monad.Except
-import           Control.Monad.Fail (MonadFail)
-import qualified Control.Monad.Fail as Fail
-import           Control.Monad.Free.Church
-import           Control.Monad.Reader
-
-import qualified Data.Aeson as A (Value)
-import           Data.ByteString.Builder
-import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy as BL
-import           Data.Int
-import           Data.List
-import           Data.Maybe
-import           Data.Ratio
-import           Data.Scientific
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import qualified Data.Text.Encoding.Error as TE
-import qualified Data.Text.Lazy as TL
+import           Control.Exception.Safe (Exception (..), MonadCatch, MonadMask,
+                                         MonadThrow, bracket, throwIO)
+import           Control.Monad.Except (Except, catchError, runExcept,
+                                       throwError)
+import           Control.Monad.Free.Church (iterM)
+import           Control.Monad.IO.Class (MonadIO (..))
+import           Control.Monad.Reader (ReaderT (..))
+import           Control.Monad.State.Strict (StateT, evalStateT, get, gets,
+                                             modify, put)
+import           Data.Aeson (Value)
+import           Data.ByteString (ByteString)
+import           Data.Int (Int16, Int32, Int64, Int8)
+import           Data.Scientific (Scientific)
+import           Data.Text (Text)
 import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
-import           Data.Word
-import           Data.Functor.Identity
-import           Network.URI
-import           Text.Read hiding (step)
+import           Data.Vector (Vector)
+import qualified Data.Vector as V
+import           Data.Word (Word16, Word32, Word64, Word8)
+import           Database.Beam.Backend (BeamBackend (..), BeamRowReadError (..),
+                                        BeamSqlBackend, BeamSqlBackendSyntax,
+                                        FromBackendRow (..),
+                                        FromBackendRowF (..),
+                                        FromBackendRowM (..), MonadBeam (..))
+import           Database.Beam.Backend.SQL (BeamSqlBackendIsString, SqlNull)
+import           Database.Beam.MySQL.FromField (FromField (..))
+import           Database.Beam.MySQL.Syntax (MysqlSyntax, intoDebugText,
+                                             intoQuery)
+import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
+                                      HasSqlQuantifiedEqualityCheck)
+import           Database.Beam.Query.SQL92 (buildSql92Query')
+import           Database.MySQL.Base (FieldType, MySQLConn, MySQLValue,
+                                      columnType, execute_, queryVector_,
+                                      skipToEof)
+import           Prelude hiding (mapM, read)
+import           System.IO.Streams (peek, read)
+import           System.IO.Streams.Combinators (mapM)
+import           System.IO.Streams.List (toList)
 
 data MySQL = MySQL
 
 instance BeamSqlBackendIsString MySQL String
-instance BeamSqlBackendIsString MySQL T.Text
+
+instance BeamSqlBackendIsString MySQL Text
 
 instance BeamBackend MySQL where
-    type BackendFromField MySQL = FromField
+  type BackendFromField MySQL = FromField
 
 instance BeamSqlBackend MySQL
-type instance BeamSqlBackendSyntax MySQL = MysqlCommandSyntax
 
-newtype MySQLM a = MySQLM (ReaderT (Text -> IO (), Connection) IO a)
-    deriving (Monad, MonadIO, Applicative, Functor)
-
-instance MonadFail MySQLM where
-    fail e = fail $ "Internal Error with: " <> show e
-
-newtype NotEnoughColumns
-    = NotEnoughColumns
-    { _errColCount :: Int
-    } deriving stock Show
-
-
-
-instance Exception NotEnoughColumns where
-    displayException (NotEnoughColumns colCnt) =
-        mconcat [ "Not enough columns while reading MySQL row. Only have "
-                , show colCnt, " column(s)" ]
-
-data CouldNotReadColumn
-  = CouldNotReadColumn
-  { _errColIndex :: Int
-  , _errColMsg   :: String }
-  deriving Show
-
-instance Exception CouldNotReadColumn where
-  displayException (CouldNotReadColumn idx msg) =
-    mconcat [ "Could not read column ", show idx, ": ", msg ]
-
-runBeamMySQLDebug :: (Text -> IO ()) -> Connection -> MySQLM a -> IO a
-runBeamMySQLDebug = withMySQL
-
-runBeamMySQL :: Connection -> MySQLM a -> IO a
-runBeamMySQL = runBeamMySQLDebug (\_ -> pure ())
-
-instance MonadBeam MySQL MySQLM where
-    runReturningMany (MysqlCommandSyntax (MysqlSyntax cmd))
-                     (consume :: MySQLM (Maybe x) -> MySQLM a) =
-        MySQLM . ReaderT $ \(dbg, conn) -> do
-          cmdBuilder <- cmd (\_ b _ -> pure b) (MySQL.escape conn) mempty conn
-          let cmdStr = BL.toStrict (toLazyByteString cmdBuilder)
-
-          dbg (TE.decodeUtf8With TE.lenientDecode cmdStr)
-
-          MySQL.query conn cmdStr
-
-          bracket (useResult conn) freeResult $ \res -> do
-            fieldDescs <- MySQL.fetchFields res
-
-            let fetchRow' :: MySQLM (Maybe x)
-                fetchRow' =
-                  MySQLM . ReaderT $ \_ -> do
-                    fields <- MySQL.fetchRow res
-
-                    case fields of
-                      [] -> pure Nothing
-                      _ -> do
-                        let FromBackendRowM go = fromBackendRow
-                        rowRes <- runF go (\x _ _ -> pure (Right x)) step
-                                    0 (zip fieldDescs fields)
-                        case rowRes of
-                          Left err -> throwIO err
-                          Right x -> pure (Just x)
-
-                parseField :: forall field. FromField field
-                           => MySQL.Field -> Maybe BS.ByteString
-                           -> IO (Either ColumnParseError field)
-                parseField ty d = runExceptT (fromField ty d)
-
-                step :: forall y
-                      . FromBackendRowF MySQL (Int -> [(MySQL.Field, Maybe BS.ByteString)] -> IO (Either BeamRowReadError y))
-                     -> Int -> [(MySQL.Field, Maybe BS.ByteString)] -> IO (Either BeamRowReadError y)
-                step (ParseOneField _) curCol [] =
-                    pure (Left (BeamRowReadError (Just curCol) (ColumnNotEnoughColumns curCol)))
-
-                step (ParseOneField next) curCol ((desc, field):fields) =
-                    do d <- parseField desc field
-                       case d of
-                         Left  e  -> pure (Left (BeamRowReadError (Just curCol) e))
-                         Right d' -> next d' (curCol + 1) fields
-
-                step (Alt (FromBackendRowM a) (FromBackendRowM b) next) curCol cols =
-                    do aRes <- runF a (\x curCol' cols' -> pure (Right (next x curCol' cols'))) step curCol cols
-                       case aRes of
-                         Right next' -> next'
-                         Left aErr -> do
-                           bRes <- runF b (\x curCol' cols' -> pure (Right (next x curCol' cols'))) step curCol cols
-                           case bRes of
-                             Right next' -> next'
-                             Left _ -> pure (Left aErr)
-
-                step (FailParseWith err) _ _ = pure (Left err)
-
-                MySQLM doConsume = consume fetchRow'
-
-            runReaderT doConsume (dbg, conn)
-
-withMySQL :: (Text -> IO ()) -> Connection
-          -> MySQLM a -> IO a
-withMySQL dbg conn (MySQLM a) =
-    runReaderT a (dbg, conn)
-
-mysqlUriSyntax :: c MySQL Connection MySQLM
-               -> BeamURIOpeners c
-mysqlUriSyntax =
-    mkUriOpener (withMySQL (const (pure ()))) "mysql:"
-        (\uri ->
-             let stripSuffix s a =
-                     reverse <$> stripPrefix (reverse s) (reverse a)
-
-                 (user, pw) =
-                     fromMaybe ("root", "") $ do
-                       userInfo  <- fmap uriUserInfo (uriAuthority uri)
-                       userInfo' <- stripSuffix "@" userInfo
-                       let (user', pw') = break (== ':') userInfo'
-                           pw'' = fromMaybe "" (stripPrefix ":" pw')
-                       pure (user', pw'')
-                 host =
-                    maybe "localhost" uriRegName . uriAuthority $ uri
-                 port =
-                     fromMaybe 3306 $ do
-                       portStr <- fmap uriPort (uriAuthority uri)
-                       portStr' <- stripPrefix ":" portStr
-                       readMaybe portStr'
-
-                 db = fromMaybe "test" $
-                      stripPrefix "/" (uriPath uri)
-
-                 options =
-                   fromMaybe [CharsetName "utf-8"] $ do
-                     opts <- stripPrefix "?" (uriQuery uri)
-                     let getKeyValuePairs "" a = a []
-                         getKeyValuePairs d a =
-                             let (keyValue, d') = break (=='&') d
-                                 attr = parseKeyValue keyValue
-                             in getKeyValuePairs d' (a . maybe id (:) attr)
-
-                     pure (getKeyValuePairs opts id)
-
-                 parseBool (Just "true") = pure True
-                 parseBool (Just "false") = pure False
-                 parseBool _ = Nothing
-
-                 parseKeyValue kv = do
-                   let (key, value) = break (==':') kv
-                       value' = stripPrefix ":" value
-
-                   case (key, value') of
-                     ("connectTimeout", Just secs) ->
-                         ConnectTimeout <$> readMaybe secs
-                     ( "compress", _) -> pure Compress
-                     ( "namedPipe", _ ) -> pure NamedPipe
-                     ( "initCommand", Just cmd ) ->
-                         pure (InitCommand (BS.pack cmd))
-                     ( "readDefaultFile", Just fp ) ->
-                         pure (ReadDefaultFile fp)
-                     ( "readDefaultGroup", Just grp ) ->
-                         pure (ReadDefaultGroup (BS.pack grp))
-                     ( "charsetDir", Just fp ) ->
-                         pure (CharsetDir fp)
-                     ( "charsetName", Just nm ) ->
-                         pure (CharsetName nm)
-                     ( "localInFile", b ) ->
-                         LocalInFile <$> parseBool b
-                     ( "protocol", Just p) ->
-                         case p of
-                           "tcp" -> pure (Protocol TCP)
-                           "socket" -> pure (Protocol Socket)
-                           "pipe" -> pure (Protocol Pipe)
-                           "memory" -> pure (Protocol Memory)
-                           _ -> Nothing
-                     ( "sharedMemoryBaseName", Just fp ) ->
-                         pure (SharedMemoryBaseName (BS.pack fp))
-                     ( "readTimeout", Just secs ) ->
-                         ReadTimeout <$> readMaybe secs
-                     ( "writeTimeout", Just secs ) ->
-                        WriteTimeout <$> readMaybe secs
-                     -- ( "useRemoteConnection", _ ) -> pure UseRemoteConnection
-                     -- ( "useEmbeddedConnection", _ ) -> pure UseEmbeddedConnection
-                     -- ( "guessConnection", _ ) -> pure GuessConnection
-                     -- ( "clientIp", Just fp) -> pure (ClientIP (BS.pack fp))
-                     ( "secureAuth", b ) ->
-                         SecureAuth <$> parseBool b
-                     ( "reportDataTruncation", b ) ->
-                         ReportDataTruncation <$> parseBool b
-                     ( "reconnect", b ) ->
-                         Reconnect <$> parseBool b
-                     -- ( "sslVerifyServerCert", b) -> SSLVerifyServerCert <$> parseBool b
-                     ( "foundRows", _ ) -> pure FoundRows
-                     ( "ignoreSIGPIPE", _ ) -> pure IgnoreSIGPIPE
-                     ( "ignoreSpace", _ ) -> pure IgnoreSpace
-                     ( "interactive", _ ) -> pure Interactive
-                     ( "localFiles", _ ) -> pure LocalFiles
-                     ( "multiResults", _ ) -> pure MultiResults
-                     ( "multiStatements", _ ) -> pure MultiStatements
-                     ( "noSchema", _ ) -> pure NoSchema
-                     _ -> Nothing
-
-                 connInfo = ConnectInfo
-                          { connectHost = host, connectPort = port
-                          , connectUser = user, connectPassword = pw
-                          , connectDatabase = db, connectOptions = options
-                          , connectPath = "", connectSSL = Nothing }
-             in connect connInfo >>= \hdl -> pure (hdl, close hdl))
-
-#define FROM_BACKEND_ROW(ty) instance FromBackendRow MySQL ty
-
-FROM_BACKEND_ROW(Bool)
-FROM_BACKEND_ROW(Word)
-FROM_BACKEND_ROW(Word8)
-FROM_BACKEND_ROW(Word16)
-FROM_BACKEND_ROW(Word32)
-FROM_BACKEND_ROW(Word64)
-FROM_BACKEND_ROW(Int)
-FROM_BACKEND_ROW(Int8)
-FROM_BACKEND_ROW(Int16)
-FROM_BACKEND_ROW(Int32)
-FROM_BACKEND_ROW(Int64)
-FROM_BACKEND_ROW(Float)
-FROM_BACKEND_ROW(Double)
-FROM_BACKEND_ROW(Scientific)
-FROM_BACKEND_ROW((Ratio Integer))
-FROM_BACKEND_ROW(BS.ByteString)
-FROM_BACKEND_ROW(BL.ByteString)
-FROM_BACKEND_ROW(T.Text)
-FROM_BACKEND_ROW(TL.Text)
-FROM_BACKEND_ROW(Day)
-FROM_BACKEND_ROW(LocalTime)
-FROM_BACKEND_ROW(A.Value)
-FROM_BACKEND_ROW(SqlNull)
-
--- * Equality checks
-#define HAS_MYSQL_EQUALITY_CHECK(ty)                       \
-  instance HasSqlEqualityCheck MySQL (ty); \
-  instance HasSqlQuantifiedEqualityCheck MySQL (ty);
-
-HAS_MYSQL_EQUALITY_CHECK(Bool)
-HAS_MYSQL_EQUALITY_CHECK(Double)
-HAS_MYSQL_EQUALITY_CHECK(Float)
-HAS_MYSQL_EQUALITY_CHECK(Int)
-HAS_MYSQL_EQUALITY_CHECK(Int8)
-HAS_MYSQL_EQUALITY_CHECK(Int16)
-HAS_MYSQL_EQUALITY_CHECK(Int32)
-HAS_MYSQL_EQUALITY_CHECK(Int64)
-HAS_MYSQL_EQUALITY_CHECK(Integer)
-HAS_MYSQL_EQUALITY_CHECK(Word)
-HAS_MYSQL_EQUALITY_CHECK(Word8)
-HAS_MYSQL_EQUALITY_CHECK(Word16)
-HAS_MYSQL_EQUALITY_CHECK(Word32)
-HAS_MYSQL_EQUALITY_CHECK(Word64)
-HAS_MYSQL_EQUALITY_CHECK(T.Text)
-HAS_MYSQL_EQUALITY_CHECK(TL.Text)
-HAS_MYSQL_EQUALITY_CHECK([Char])
-HAS_MYSQL_EQUALITY_CHECK(Scientific)
-HAS_MYSQL_EQUALITY_CHECK(Day)
-HAS_MYSQL_EQUALITY_CHECK(TimeOfDay)
-HAS_MYSQL_EQUALITY_CHECK(NominalDiffTime)
-HAS_MYSQL_EQUALITY_CHECK(LocalTime)
+type instance BeamSqlBackendSyntax MySQL = MysqlSyntax
 
 instance HasQBuilder MySQL where
-    buildSqlQuery = buildSql92Query' True
+  buildSqlQuery = buildSql92Query' True
 
+-- Instances for all types we can read using this library from the database
 
--- https://dev.mysql.com/doc/refman/5.6/en/information-functions.html#function_last-insert-id
---
--- The ID that was generated is maintained in the server on a per-connection basis.
--- This means that the value returned by the function to a given client is the first AUTO_INCREMENT value generated
---   for most recent statement affecting an AUTO_INCREMENT column by that client.
--- This value cannot be affected by other clients,
---   even if they generate AUTO_INCREMENT values of their own.
--- This behavior ensures that each client can retrieve its own ID without concern for the activity of other clients,
---   and without the need for locks or transactions.
+instance FromBackendRow MySQL Bool
 
--- https://dev.mysql.com/doc/refman/8.0/en/create-temporary-table.html
---
--- A TEMPORARY table is visible only within the current session, and is dropped automatically when the session is closed.
--- This means that two different sessions can use the same temporary table name without conflicting with each other
---   or with an existing non-TEMPORARY table of the same name.
--- (The existing table is hidden until the temporary table is dropped.)
+instance HasSqlEqualityCheck MySQL Bool
 
-runInsertReturningList
-  :: FromBackendRow MySQL (table Identity)
-  => SqlInsert MySQL table
-  -> MySQLM [ table Identity ]
-runInsertReturningList SqlInsertNoRows = pure []
-runInsertReturningList (SqlInsert _ is@(MysqlInsertSyntax tn@(MysqlTableNameSyntax shema table) fields values)) =
-  case values of
-    MysqlInsertSelectSyntax _    -> fail "Not implemented runInsertReturningList part handling: INSERT INTO .. SELECT .."
-    MysqlInsertValuesSyntax vals -> do
+instance HasSqlQuantifiedEqualityCheck MySQL Bool
 
-      let tableB  = emit $ TE.encodeUtf8Builder $ table
-      let schemaB = emit $ TE.encodeUtf8Builder $ maybe "DATABASE()" (\s -> "'" <> s <> "'") shema
+instance FromBackendRow MySQL Int8
 
-      (keycols :: [T.Text]) <- runReturningList $ MysqlCommandSyntax $
-        emit "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
-        emit "`table_schema`=" <> schemaB <> emit " AND `table_name`='" <> tableB <>
-        emit "' AND `column_key` LIKE 'PRI'"
+instance HasSqlEqualityCheck MySQL Int8
 
-      let pk = intersect keycols fields
+instance HasSqlQuantifiedEqualityCheck MySQL Int8
 
-      when (null pk) $ fail "Table PK is not part of beam-table. Tables with no PK not allowed."
+instance FromBackendRow MySQL Int16
 
-      (aicol :: Maybe T.Text) <- runReturningOne $ MysqlCommandSyntax $
-        emit "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
-        emit "`table_schema`=" <> schemaB <> emit " AND `table_name`='" <> tableB <>
-        emit "' AND `extra` LIKE 'auto_increment'"
+instance HasSqlEqualityCheck MySQL Int16
 
-      let equalTo :: (T.Text, MysqlExpressionSyntax) -> MysqlSyntax
-          equalTo (f, v) = mysqlIdentifier f <> emit "=" <> fromMysqlExpression v
+instance HasSqlQuantifiedEqualityCheck MySQL Int16
 
-      let csfields = mysqlSepBy (emit ", ") $ fmap mysqlIdentifier fields
+instance FromBackendRow MySQL Int32
 
-      let fast = do
-            runNoReturn $ MysqlCommandSyntax $ fromMysqlInsert is
+instance HasSqlEqualityCheck MySQL Int32
 
-            -- Select inserted rows by Primary Keys
-            -- Result can be totally wrong if some of (vals :: MysqlExpressionSyntax) can result in
-            -- different values when evaluated by db.
-            runReturningList $ MysqlCommandSyntax $ emit "SELECT " <> csfields <> emit " FROM " <> fromMysqlTableName tn <> emit " WHERE " <>
-              mysqlSepBy (emit " OR ") (mysqlSepBy (emit " AND ") . fmap equalTo . filter (flip elem pk . fst) . zip fields <$> vals)
+instance HasSqlQuantifiedEqualityCheck MySQL Int32
 
-      case aicol of
-        Nothing -> fast -- no AI we can use PK to select inserted rows.
-        Just ai -> if not $ elem ai pk
-          then fast     -- AI exists and not part of PK, so we don't care about it
-          else do       -- AI exists and is part of PK
-            let tempTableName = emit "`_insert_returning_implementation`"
+instance FromBackendRow MySQL Int64
 
-            runNoReturn $ MysqlCommandSyntax $
-              emit "DROP TEMPORARY TABLE IF EXISTS " <> tempTableName
+instance HasSqlEqualityCheck MySQL Int64
 
-            runNoReturn $ MysqlCommandSyntax $
-              emit "CREATE TEMPORARY TABLE " <> tempTableName <> emit " SELECT " <> csfields <> emit " FROM " <> fromMysqlTableName tn <> emit " LIMIT 0"
+instance HasSqlQuantifiedEqualityCheck MySQL Int64
 
-            flip mapM_ vals $ \val -> do
-              runNoReturn $ MysqlCommandSyntax $
-                fromMysqlInsert $ MysqlInsertSyntax tn fields (MysqlInsertValuesSyntax [val])
+instance FromBackendRow MySQL Int
 
-              -- hacky. But is there any other way to figure out if AI field is set to some value, or DEFAULT, for example?
-              let compareMysqlExporessions a b =
-                    (toLazyByteString $ unwrapInnerBuilder $ fromMysqlExpression a) ==
-                    (toLazyByteString $ unwrapInnerBuilder $ fromMysqlExpression b)
+instance HasSqlEqualityCheck MySQL Int
 
-              let go (f, v) = (f, if f == ai && compareMysqlExporessions v defaultE then MysqlExpressionSyntax $ emit "LAST_INSERT_ID()" else v)
+instance HasSqlQuantifiedEqualityCheck MySQL Int
 
-              -- Select inserted rows by Primary Keys
-              -- Result can be totally wrong if some of (vals :: MysqlExpressionSyntax) can result in
-              -- different values when evaluated by db.
-              runNoReturn $ MysqlCommandSyntax $
-                emit "INSERT INTO " <> tempTableName <> emit " SELECT " <> csfields <> emit " FROM " <> fromMysqlTableName tn <>
-                emit " WHERE " <> (mysqlSepBy (emit " AND ") $ fmap equalTo $ filter (flip elem pk . fst) $ map go $ zip fields val)
+instance FromBackendRow MySQL Word8
 
-            res <- runReturningList $ MysqlCommandSyntax $
-              emit "SELECT " <> csfields <> emit " FROM " <> tempTableName
+instance HasSqlEqualityCheck MySQL Word8
 
-            runNoReturn $ MysqlCommandSyntax $
-              emit "DROP TEMPORARY TABLE " <> tempTableName
+instance HasSqlQuantifiedEqualityCheck MySQL Word8
 
-            pure res
+instance FromBackendRow MySQL Word16
 
+instance HasSqlEqualityCheck MySQL Word16
 
-instance Beam.MonadBeamInsertReturning MySQL MySQLM where
-  runInsertReturningList = runInsertReturningList
+instance HasSqlQuantifiedEqualityCheck MySQL Word16
 
-runInsertRowReturning
-  :: FromBackendRow MySQL (table Identity)
-  => SqlInsert MySQL table
-  -> MySQLM (Maybe (table Identity))
-runInsertRowReturning SqlInsertNoRows = pure Nothing
-runInsertRowReturning (SqlInsert _ is@(MysqlInsertSyntax tn@(MysqlTableNameSyntax schema table) fields values)) =
-  case values of
-    MysqlInsertSelectSyntax _    -> fail "Not implemented runInsertReturningList part handling: INSERT INTO .. SELECT .."
-    MysqlInsertValuesSyntax (_:_:_) -> fail "runInsertRowReturning can't be used to insert several rows"
-    MysqlInsertValuesSyntax ([]) -> pure Nothing
-    MysqlInsertValuesSyntax ([vals]) -> do
-      let tableB  = emit $ TE.encodeUtf8Builder $ table
-      let schemaB = emit $ TE.encodeUtf8Builder $ maybe "DATABASE()" (\s -> "'" <> s <> "'") schema
+instance FromBackendRow MySQL Word32
 
-      (keycols :: [T.Text]) <- runReturningList $ MysqlCommandSyntax $
-        emit "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
-        emit "`table_schema`=" <> schemaB <> emit " AND `table_name`='" <> tableB <>
-        emit "' AND `column_key` LIKE 'PRI'"
+instance HasSqlEqualityCheck MySQL Word32
 
-      let primaryKeyCols = intersect keycols fields
+instance HasSqlQuantifiedEqualityCheck MySQL Word32
 
-      when (null primaryKeyCols) $ fail "Table PK is not part of beam-table. Tables with no PK not allowed."
+instance FromBackendRow MySQL Word64
 
-      (mautoIncrementCol :: Maybe T.Text) <- runReturningOne $ MysqlCommandSyntax $
-        emit "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
-        emit "`table_schema`=" <> schemaB <> emit " AND `table_name`='" <> tableB <>
-        emit "' AND `extra` LIKE 'auto_increment'"
+instance HasSqlEqualityCheck MySQL Word64
 
-      let equalTo :: (T.Text, MysqlExpressionSyntax) -> MysqlSyntax
-          equalTo (field, value) = mysqlIdentifier field <> emit "=" <> fromMysqlExpression value
+instance HasSqlQuantifiedEqualityCheck MySQL Word64
 
-      let fieldsExpr = mysqlSepBy (emit ", ") $ fmap mysqlIdentifier fields
+instance FromBackendRow MySQL Word
 
-      let selectByPrimaryKeyCols colValues =
-            -- Select inserted rows by Primary Keys
-            -- Result can be totally wrong if some of (vals :: MysqlExpressionSyntax) can result in
-            -- different values when evaluated by db.
-            runReturningOne $ MysqlCommandSyntax $
-              emit "SELECT " <> fieldsExpr <> emit " FROM " <> fromMysqlTableName tn <> emit " WHERE " <>
-              (mysqlSepBy (emit " AND ") . fmap equalTo . filter ((`elem` primaryKeyCols) . fst) $ colValues)
+instance HasSqlEqualityCheck MySQL Word
 
-      let insertReturningWithoutAutoincrement = do
-            runNoReturn $ MysqlCommandSyntax $ fromMysqlInsert is
-            selectByPrimaryKeyCols $ zip fields vals
+instance HasSqlQuantifiedEqualityCheck MySQL Word
 
-      case mautoIncrementCol of
-        Nothing -> insertReturningWithoutAutoincrement -- no AI we can use PK to select inserted rows.
-        Just aiCol ->
-          if notElem aiCol primaryKeyCols
-          then insertReturningWithoutAutoincrement    -- AI exists and not part of PK, so we don't care about it
-          else do                                     -- AI exists and is part of PK
-            runNoReturn $ MysqlCommandSyntax $
-              fromMysqlInsert $ MysqlInsertSyntax tn fields (MysqlInsertValuesSyntax [vals])
+instance FromBackendRow MySQL Float
 
-            -- hacky. But is there any other way to figure out if AI field is set to some value, or DEFAULT, for example?
-            let compareMysqlExpressions a b =
-                  (toLazyByteString $ unwrapInnerBuilder $ fromMysqlExpression a) ==
-                  (toLazyByteString $ unwrapInnerBuilder $ fromMysqlExpression b)
+instance HasSqlEqualityCheck MySQL Float
 
-            let compareWithAutoincrement (field, value) =
-                  (field, if field == aiCol && compareMysqlExpressions value defaultE
-                          then MysqlExpressionSyntax $ emit "last_insert_id()"
-                          else value)
+instance HasSqlQuantifiedEqualityCheck MySQL Float
 
-            selectByPrimaryKeyCols . map compareWithAutoincrement $ zip fields vals
+instance FromBackendRow MySQL Double
+
+instance HasSqlEqualityCheck MySQL Double
+
+instance HasSqlQuantifiedEqualityCheck MySQL Double
+
+instance FromBackendRow MySQL Scientific
+
+instance HasSqlEqualityCheck MySQL Scientific
+
+instance HasSqlQuantifiedEqualityCheck MySQL Scientific
+
+instance FromBackendRow MySQL SqlNull
+
+instance HasSqlEqualityCheck MySQL SqlNull
+
+instance HasSqlQuantifiedEqualityCheck MySQL SqlNull
+
+instance FromBackendRow MySQL ByteString
+
+instance HasSqlEqualityCheck MySQL ByteString
+
+instance HasSqlQuantifiedEqualityCheck MySQL ByteString
+
+instance FromBackendRow MySQL Text
+
+instance HasSqlEqualityCheck MySQL Text
+
+instance HasSqlQuantifiedEqualityCheck MySQL Text
+
+instance FromBackendRow MySQL LocalTime
+
+instance HasSqlEqualityCheck MySQL LocalTime
+
+instance HasSqlQuantifiedEqualityCheck MySQL LocalTime
+
+instance FromBackendRow MySQL Day
+
+instance HasSqlEqualityCheck MySQL Day
+
+instance HasSqlQuantifiedEqualityCheck MySQL Day
+
+instance FromBackendRow MySQL TimeOfDay
+
+instance HasSqlEqualityCheck MySQL TimeOfDay
+
+instance HasSqlQuantifiedEqualityCheck MySQL TimeOfDay
+
+instance FromBackendRow MySQL NominalDiffTime
+
+instance HasSqlEqualityCheck MySQL NominalDiffTime
+
+instance HasSqlQuantifiedEqualityCheck MySQL NominalDiffTime
+
+instance FromBackendRow MySQL Value
+
+instance HasSqlEqualityCheck MySQL Value
+
+instance HasSqlQuantifiedEqualityCheck MySQL Value
+
+-- Our 'operational monad'
+
+newtype MySQLM a = MySQLM (ReaderT (Text -> IO (), MySQLConn) IO a)
+  deriving newtype (Functor,
+                    Applicative,
+                    Monad,
+                    MonadIO,
+                    MonadMask,
+                    MonadCatch,
+                    MonadThrow)
+
+instance MonadFail MySQLM where
+  fail err = fail ("Internal error with: " <> err)
+
+newtype NotEnoughColumns = NotEnoughColumns Int
+  deriving stock (Show)
+
+instance MonadBeam MySQL MySQLM where
+  runReturningMany sql callback = do
+    let statement = intoQuery sql
+    let debugText = intoDebugText sql
+    bracket (acquire statement debugText)
+            drainStream
+            (\(cols, stream) -> do
+              stream' <-
+                liftIO .
+                  mapM (fromSingleRow . V.zipWith (\col -> (columnType col,)) cols) $
+                  stream
+              callback (liftIO . read $ stream'))
+    where
+      acquire s dt = MySQLM . ReaderT $ \(dbg, conn) -> do
+        dbg dt
+        queryVector_ conn s
+      drainStream (_, stream) = liftIO . skipToEof $ stream
+  runReturningList sql = MySQLM . ReaderT $ go
+    where
+      go (dbg, conn) = do
+        let statement = intoQuery sql
+        bracket (do
+                  dbg . intoDebugText $ sql
+                  queryVector_ conn statement)
+                (\(_, stream) -> skipToEof stream)
+                (\(cols, stream) -> do
+                  stream' <-
+                    mapM (fromSingleRow . V.zipWith (\col -> (columnType col,)) cols) stream
+                  toList stream')
+  runReturningOne :: forall a . (FromBackendRow MySQL a) => MysqlSyntax -> MySQLM (Maybe a)
+  runReturningOne sql = MySQLM . ReaderT $ go
+    where
+      go (dbg, conn) = do
+        let statement = intoQuery sql
+        bracket (do
+                  dbg . intoDebugText $ sql
+                  queryVector_ conn statement)
+                (\(_, stream) -> skipToEof stream)
+                processOneResult
+      processOneResult (cols, stream) = do
+        mRes <- read stream
+        case mRes of
+          Nothing -> pure Nothing
+          Just res -> do
+            don'tCare <- peek stream
+            case don'tCare of
+              Nothing ->
+                Just <$> (fromSingleRow . V.zipWith (\col -> (columnType col,)) cols $ res)
+              Just _  -> pure Nothing
+  runNoReturn sql = MySQLM . ReaderT $ go
+    where
+      go (dbg, conn) = do
+        let statement = intoQuery sql
+        dbg . intoDebugText $ sql
+        _ <- liftIO . execute_ conn $ statement
+        pure ()
+
+instance Exception NotEnoughColumns where
+  displayException (NotEnoughColumns colCount) =
+    "Not enough columns when reading MySQL row. Only have " <>
+    show colCount <>
+    " column(s)."
+
+data CouldNotReadColumn = CouldNotReadColumn {
+  errColIndex   :: {-# UNPACK #-} !Int,
+  errColMessage :: !String
+  }
+  deriving stock (Show)
+
+instance Exception CouldNotReadColumn where
+  displayException e =
+    "Could not read column " <>
+    (show . errColIndex $ e) <>
+    ": " <>
+    errColMessage e
+
+runBeamMySQL :: MySQLConn -> MySQLM a -> IO a
+runBeamMySQL conn (MySQLM comp) = runReaderT comp (\_ -> pure (), conn)
+
+runBeamMySQLDebug :: (Text -> IO ()) -> MySQLConn -> MySQLM a -> IO a
+runBeamMySQLDebug dbg conn (MySQLM comp) = runReaderT comp (dbg, conn)
+
+-- Helpers
+
+fromSingleRow :: forall a . (FromBackendRow MySQL a) => Vector (FieldType, MySQLValue) -> IO a
+fromSingleRow v = case runExcept (evalStateT (iterM go churched) v) of
+  Left err  -> throwIO err
+  Right val -> pure val
+  where
+    FromBackendRowM churched :: FromBackendRowM MySQL a = fromBackendRow
+    go :: forall b .
+      FromBackendRowF MySQL (StateT (Vector (FieldType, MySQLValue)) (Except BeamRowReadError) b) ->
+      StateT (Vector (FieldType, MySQLValue)) (Except BeamRowReadError) b
+    go = \case
+      ParseOneField callback -> do
+        current <- gets (fromField . V.head)
+        case current of
+          Left err  -> throwError . BeamRowReadError Nothing $ err
+          Right val -> do
+            modify V.tail
+            callback val
+      Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
+        captured <- get
+        catchError (callback =<< iterM go opt1)
+                   (\_ -> put captured >> (callback =<< iterM go opt2))
+      FailParseWith err -> throwError err

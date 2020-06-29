@@ -1,597 +1,515 @@
-{-# LANGUAGE RankNTypes   #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies        #-}
 
-module Database.Beam.MySQL.Syntax where
+module Database.Beam.MySQL.Syntax (MysqlSyntax, intoQuery, intoDebugText) where
 
-import qualified Data.Aeson                         as A (Value, encode)
-import           Data.ByteString                    (ByteString)
-import           Data.ByteString.Builder
-import           Data.ByteString.Builder.Scientific (scientificBuilder)
-import qualified Data.ByteString.Lazy               as BL (toStrict)
-import           Data.Fixed
-import           Data.Functor.Identity
-import           Data.Int
-import           Data.Scientific                    (Scientific)
-import           Data.String
-import           Data.Text                          (Text)
-import qualified Data.Text                          as T
-import qualified Data.Text.Encoding                 as TE
-import qualified Data.Text.Lazy                     as TL
-import           Data.Time
-import           Data.Word
-import           Database.Beam.Backend.SQL
-import           Database.Beam.Query
+import           Data.Aeson (Value)
+import           Data.Aeson.Text (encodeToTextBuilder)
+import           Data.ByteString (ByteString)
+import           Data.Fixed (E12, Fixed, showFixed)
+import           Data.Foldable (fold)
+import           Data.Int (Int16, Int32, Int64, Int8)
+import           Data.List (intersperse)
+import           Data.Scientific (Scientific)
+import           Data.String (IsString, fromString)
+import           Data.Text (Text)
+import           Data.Text.Encoding (decodeUtf8)
+import qualified Data.Text.Lazy as TL
+import           Data.Text.Lazy.Builder (Builder, fromLazyText, fromText,
+                                         toLazyText)
+import           Data.Text.Lazy.Builder.Scientific (scientificBuilder)
+import qualified Data.Text.Lazy.Encoding as TLE
+import           Data.Time.Calendar (Day)
+import           Data.Time.Clock (NominalDiffTime)
+import           Data.Time.Format.ISO8601 (formatShow, iso8601Format)
+import           Data.Time.LocalTime (LocalTime, TimeOfDay, localDay,
+                                      localTimeOfDay)
+import           Data.Word (Word16, Word32, Word64, Word8)
+import           Database.Beam.Backend.SQL (HasSqlValueSyntax (..), IsSql92AggregationExpressionSyntax (..),
+                                            IsSql92AggregationSetQuantifierSyntax (..),
+                                            IsSql92DataTypeSyntax (..),
+                                            IsSql92DeleteSyntax (..),
+                                            IsSql92ExpressionSyntax (..),
+                                            IsSql92ExtractFieldSyntax (..),
+                                            IsSql92FieldNameSyntax (..),
+                                            IsSql92FromSyntax (..),
+                                            IsSql92GroupingSyntax (..),
+                                            IsSql92InsertSyntax (..),
+                                            IsSql92InsertValuesSyntax (..),
+                                            IsSql92OrderingSyntax (..),
+                                            IsSql92ProjectionSyntax (..),
+                                            IsSql92QuantifierSyntax (..),
+                                            IsSql92SelectSyntax (..),
+                                            IsSql92SelectTableSyntax (..),
+                                            IsSql92Syntax (..),
+                                            IsSql92TableNameSyntax (..),
+                                            IsSql92TableSourceSyntax (..),
+                                            IsSql92UpdateSyntax (..),
+                                            IsSql99ConcatExpressionSyntax (..),
+                                            SqlNull (..))
+import           Database.MySQL.Base (Query (..))
 
-data MysqlInsertSyntax = MysqlInsertSyntax MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
-data MysqlTableNameSyntax = MysqlTableNameSyntax (Maybe Text) Text
+-- General syntax type
+newtype MysqlSyntax = MysqlSyntax Builder
+  deriving newtype (Semigroup, Monoid, Eq, IsString)
 
-data MysqlInsertValuesSyntax
-  = MysqlInsertValuesSyntax [[MysqlExpressionSyntax]]
-  | MysqlInsertSelectSyntax MysqlSelectSyntax
+intoQuery :: MysqlSyntax -> Query
+intoQuery (MysqlSyntax b) = Query . TLE.encodeUtf8 . toLazyText $ b
 
-fromMysqlInsertValues :: MysqlInsertValuesSyntax -> MysqlSyntax
-fromMysqlInsertValues (MysqlInsertSelectSyntax a)  = fromMysqlSelect a
-fromMysqlInsertValues (MysqlInsertValuesSyntax es) =
-    emit "VALUES " <>
-    mysqlSepBy (emit ", ")
-               (map (\es' -> emit "(" <>
-                             mysqlSepBy (emit ", ")
-                                        (fmap fromMysqlExpression es') <>
-                            emit ")")
-                    es)
+intoDebugText :: MysqlSyntax -> Text
+intoDebugText (MysqlSyntax b) = TL.toStrict . toLazyText $ b
 
-fromMysqlInsert :: MysqlInsertSyntax -> MysqlSyntax
-fromMysqlInsert (MysqlInsertSyntax tblName fields values) =
-    emit "INSERT INTO " <> fromMysqlTableName tblName <> emit "(" <>
-    mysqlSepBy (emit ", ") (map mysqlIdentifier fields) <> emit ") " <>
-    fromMysqlInsertValues values
+quoteWrap :: Builder -> MysqlSyntax
+quoteWrap = wrap "'" "'"
 
-fromMysqlTableName :: MysqlTableNameSyntax -> MysqlSyntax
-fromMysqlTableName (MysqlTableNameSyntax s t) =
-    case s of
-      Nothing -> mysqlIdentifier t
-      Just s' -> mysqlIdentifier s' <> emit "." <> mysqlIdentifier t
+backtickWrap :: Builder -> MysqlSyntax
+backtickWrap = wrap "`" "`"
 
-newtype MysqlSyntax
-    = MysqlSyntax
-    { fromMysqlSyntax :: forall m c. Monad m
-                      => ((ByteString -> m ByteString) -> Builder -> c -> m Builder)
-                      ->  (ByteString -> m ByteString) -> Builder -> c -> m Builder
-    }
+bracketWrap :: Builder -> MysqlSyntax
+bracketWrap = wrap "(" ")"
 
-unwrapInnerBuilder :: MysqlSyntax -> Builder
-unwrapInnerBuilder s = runIdentity $ fromMysqlSyntax s (\_ b _ -> pure b) pure "" ()
+wrap :: Builder -> Builder -> Builder -> MysqlSyntax
+wrap lDelim rDelim b = MysqlSyntax (lDelim <> b <> rDelim)
 
-newtype MysqlCommandSyntax = MysqlCommandSyntax { fromMysqlCommand :: MysqlSyntax }
-newtype MysqlSelectSyntax = MysqlSelectSyntax { fromMysqlSelect :: MysqlSyntax }
-newtype MysqlUpdateSyntax = MysqlUpdateSyntax { fromMysqlUpdate :: MysqlSyntax }
-newtype MysqlDeleteSyntax = MysqlDeleteSyntax { fromMysqlDelete :: MysqlSyntax }
-newtype MysqlFieldNameSyntax = MysqlFieldNameSyntax { fromMysqlFieldName :: MysqlSyntax }
-newtype MysqlExpressionSyntax = MysqlExpressionSyntax { fromMysqlExpression :: MysqlSyntax } deriving Eq
-newtype MysqlValueSyntax = MysqlValueSyntax { fromMysqlValue :: MysqlSyntax }
-newtype MysqlSelectTableSyntax = MysqlSelectTableSyntax { fromMysqlSelectTable :: MysqlSyntax }
-newtype MysqlSetQuantifierSyntax = MysqlSetQuantifierSyntax { fromMysqlSetQuantifier :: MysqlSyntax }
-newtype MysqlComparisonQuantifierSyntax = MysqlComparisonQuantifierSyntax { fromMysqlComparisonQuantifier :: MysqlSyntax }
-newtype MysqlOrderingSyntax = MysqlOrderingSyntax { fromMysqlOrdering :: MysqlSyntax }
-newtype MysqlFromSyntax = MysqlFromSyntax { fromMysqlFrom :: MysqlSyntax }
-newtype MysqlGroupingSyntax = MysqlGroupingSyntax { fromMysqlGrouping :: MysqlSyntax }
-newtype MysqlTableSourceSyntax = MysqlTableSourceSyntax { fromMysqlTableSource :: MysqlSyntax }
-newtype MysqlProjectionSyntax = MysqlProjectionSyntax { fromMysqlProjection :: MysqlSyntax }
+charLen :: Maybe Word -> MysqlSyntax
+charLen = bracketWrap . maybe "MAX" (fromString . show)
 
-data MysqlDataTypeSyntax
-  = MysqlDataTypeSyntax { fromMysqlDataType     :: MysqlSyntax
-                        , fromMysqlDataTypeCast :: MysqlSyntax }
+charSet :: Maybe Text -> MysqlSyntax
+charSet = foldMap ((" CHARACTER SET " <>) . backtickWrap . fromText)
 
-newtype MysqlExtractFieldSyntax = MysqlExtractFieldSyntax { fromMysqlExtractField :: MysqlSyntax }
+numPrec :: Maybe (Word, Maybe Word) -> MysqlSyntax
+numPrec = \case
+  Nothing -> mempty
+  Just (d, Nothing) -> bracketWrap . fromString . show $ d
+  Just (d, Just n) -> bracketWrap ((fromString . show $ d) <> ", " <> (fromString . show $ n))
 
-instance Eq MysqlSyntax where
-    _ == _ = False
+unaryOp :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax
+unaryOp op (MysqlSyntax arg) = op <> bracketWrap arg <> " "
 
-instance Semigroup MysqlSyntax where
-    MysqlSyntax x <> MysqlSyntax y = MysqlSyntax (x . y)
+unaryAggregation :: MysqlSyntax -> Maybe MysqlSyntax -> MysqlSyntax -> MysqlSyntax
+unaryAggregation fn q (MysqlSyntax e) = fn <> bracketWrap (go <> e)
+  where MysqlSyntax go = foldMap (<> " ") q
 
-instance Monoid MysqlSyntax where
-    mempty = MysqlSyntax id
+binOp :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax -> MysqlSyntax
+binOp op (MysqlSyntax l) (MysqlSyntax r) =
+  bracketWrap l <> " " <> op <> " " <> bracketWrap r
 
-emit :: Builder -> MysqlSyntax
-emit b = MysqlSyntax (\next doEscape before -> next doEscape (before <> b))
+compOp :: MysqlSyntax -> Maybe MysqlSyntax -> MysqlSyntax -> MysqlSyntax -> MysqlSyntax
+compOp op quantifier (MysqlSyntax l) (MysqlSyntax r) =
+  bracketWrap l <> " " <> op <> fold quantifier <> " " <> bracketWrap r
 
-escape :: ByteString -> MysqlSyntax
-escape b = MysqlSyntax (\next doEscape before conn ->
-                            doEscape b >>= \b' ->
-                            next doEscape (before <> byteString b') conn)
+postfix :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax
+postfix op (MysqlSyntax e) = bracketWrap e <> " " <> op
 
--- We use backticks in MySQL, because the double quote mode requires
--- ANSI_QUOTES, which may not always be enabled
-mysqlIdentifier :: Text -> MysqlSyntax
-mysqlIdentifier t =
-    emit "`" <>
-    MysqlSyntax (\next doEscape before ->
-                     next doEscape (before <> TE.encodeUtf8Builder t)) <>
-    emit "`"
+joinOp :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax -> Maybe MysqlSyntax -> MysqlSyntax
+joinOp joinType l r mOn = l <> " " <> joinType <> " " <> r <> fold mOn
 
-mysqlSepBy :: MysqlSyntax -> [MysqlSyntax] -> MysqlSyntax
-mysqlSepBy _ []       = mempty
-mysqlSepBy _ [a]      = a
-mysqlSepBy sep (a:as) = a <> foldMap (sep <>) as
+tableOp :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax -> MysqlSyntax
+tableOp op l r = l <> " " <> op <> " " <> r
 
-mysqlParens :: MysqlSyntax -> MysqlSyntax
-mysqlParens a = emit "(" <> a <> emit ")"
+-- Combination of data type name and its casting
+data MysqlDataTypeSyntax = MysqlDataTypeSyntax {
+  _mysqlDataType :: {-# UNPACK #-} !MysqlSyntax,
+  mysqlTypeCast  :: {-# UNPACK #-} !MysqlSyntax
+  }
+  deriving stock (Eq)
 
-instance IsSql92Syntax MysqlCommandSyntax where
-    type Sql92SelectSyntax MysqlCommandSyntax = MysqlSelectSyntax
-    type Sql92InsertSyntax MysqlCommandSyntax = MysqlInsertSyntax
-    type Sql92UpdateSyntax MysqlCommandSyntax = MysqlUpdateSyntax
-    type Sql92DeleteSyntax MysqlCommandSyntax = MysqlDeleteSyntax
+-- Table name with optional database name
+data MysqlTableNameSyntax = MysqlTableNameSyntax
+  !(Maybe Text)
+  {-# UNPACK #-} !Text
+  deriving stock (Eq)
 
-    selectCmd = MysqlCommandSyntax . fromMysqlSelect
-    insertCmd = MysqlCommandSyntax . fromMysqlInsert
-    deleteCmd = MysqlCommandSyntax . fromMysqlDelete
-    updateCmd = MysqlCommandSyntax . fromMysqlUpdate
+intoTableName :: MysqlTableNameSyntax -> MysqlSyntax
+intoTableName (MysqlTableNameSyntax db name) =
+  MysqlSyntax (foldMap (\t -> fromText t <> ".") db <> fromText name)
 
-instance IsSql92UpdateSyntax MysqlUpdateSyntax where
-    type Sql92UpdateFieldNameSyntax MysqlUpdateSyntax = MysqlFieldNameSyntax
-    type Sql92UpdateExpressionSyntax MysqlUpdateSyntax = MysqlExpressionSyntax
-    type Sql92UpdateTableNameSyntax MysqlUpdateSyntax = MysqlTableNameSyntax
+-- How we convert everything types defined in FromField to MySQL syntax
 
-    updateStmt tbl fields where_ =
-      MysqlUpdateSyntax $
-      emit "UPDATE " <> fromMysqlTableName tbl <>
-      (case fields of
-         [] -> mempty
-         _ ->
-           emit " SET " <>
-           mysqlSepBy (emit ", ") (map (\(field, val) -> fromMysqlFieldName field <> emit "=" <>
-                                                         fromMysqlExpression val) fields)) <>
-      maybe mempty (\where' -> emit " WHERE " <> fromMysqlExpression where') where_
+instance HasSqlValueSyntax MysqlSyntax Bool where
+  sqlValueSyntax = \case
+    True -> "TRUE"
+    False -> "FALSE"
 
-instance IsSql92InsertSyntax MysqlInsertSyntax where
-    type Sql92InsertValuesSyntax MysqlInsertSyntax    = MysqlInsertValuesSyntax
-    type Sql92InsertTableNameSyntax MysqlInsertSyntax = MysqlTableNameSyntax
+instance HasSqlValueSyntax MysqlSyntax Int8 where
+  sqlValueSyntax = fromString . show
 
-    insertStmt = MysqlInsertSyntax
+instance HasSqlValueSyntax MysqlSyntax Int16 where
+  sqlValueSyntax = fromString . show
 
+instance HasSqlValueSyntax MysqlSyntax Int32 where
+  sqlValueSyntax = fromString . show
 
-instance IsSql92InsertValuesSyntax MysqlInsertValuesSyntax where
-    type Sql92InsertValuesExpressionSyntax MysqlInsertValuesSyntax = MysqlExpressionSyntax
-    type Sql92InsertValuesSelectSyntax     MysqlInsertValuesSyntax = MysqlSelectSyntax
+instance HasSqlValueSyntax MysqlSyntax Int64 where
+  sqlValueSyntax = fromString . show
 
-    insertSqlExpressions = MysqlInsertValuesSyntax
-    insertFromSql        = MysqlInsertSelectSyntax
+instance HasSqlValueSyntax MysqlSyntax Int where
+  sqlValueSyntax = fromString . show
 
-instance IsSql92DeleteSyntax MysqlDeleteSyntax where
-    type Sql92DeleteExpressionSyntax MysqlDeleteSyntax = MysqlExpressionSyntax
-    type Sql92DeleteTableNameSyntax MysqlDeleteSyntax = MysqlTableNameSyntax
+instance HasSqlValueSyntax MysqlSyntax Word8 where
+  sqlValueSyntax = fromString . show
 
-    deleteStmt tbl _ where_ =
-      MysqlDeleteSyntax $
-      emit "DELETE FROM " <> fromMysqlTableName tbl <>
-      maybe mempty (\where' -> emit " WHERE " <> fromMysqlExpression where') where_
-    deleteSupportsAlias _ = False
+instance HasSqlValueSyntax MysqlSyntax Word16 where
+  sqlValueSyntax = fromString . show
 
-instance IsSql92SelectSyntax MysqlSelectSyntax where
-    type Sql92SelectSelectTableSyntax MysqlSelectSyntax = MysqlSelectTableSyntax
-    type Sql92SelectOrderingSyntax MysqlSelectSyntax = MysqlOrderingSyntax
+instance HasSqlValueSyntax MysqlSyntax Word32 where
+  sqlValueSyntax = fromString . show
 
-    selectStmt tbl ordering limit offset =
-      MysqlSelectSyntax $
-      fromMysqlSelectTable tbl <>
-      (case ordering of
-         [] -> mempty
-         _  -> emit " ORDER BY " <>
-               mysqlSepBy (emit ", ") (map fromMysqlOrdering ordering)) <>
-      case (limit, offset) of
-        (Just limit', Just offset') ->
-            emit " LIMIT " <> emit (integerDec offset') <>
-            emit ", " <> emit (integerDec limit')
-        (Just limit', Nothing) ->
-            emit " LIMIT " <> emit (integerDec limit')
-        (Nothing, Just offset') ->
-            -- TODO figure out a betterlimit
-            emit " LIMIT 1000000000 OFFSET " <> emit (integerDec offset')
-        _ -> mempty
+instance HasSqlValueSyntax MysqlSyntax Word64 where
+  sqlValueSyntax = fromString . show
 
-instance IsSql92SelectTableSyntax MysqlSelectTableSyntax where
-    type Sql92SelectTableSelectSyntax MysqlSelectTableSyntax = MysqlSelectSyntax
-    type Sql92SelectTableExpressionSyntax MysqlSelectTableSyntax = MysqlExpressionSyntax
-    type Sql92SelectTableProjectionSyntax MysqlSelectTableSyntax = MysqlProjectionSyntax
-    type Sql92SelectTableFromSyntax MysqlSelectTableSyntax = MysqlFromSyntax
-    type Sql92SelectTableGroupingSyntax MysqlSelectTableSyntax = MysqlGroupingSyntax
-    type Sql92SelectTableSetQuantifierSyntax MysqlSelectTableSyntax = MysqlSetQuantifierSyntax
+instance HasSqlValueSyntax MysqlSyntax Word where
+  sqlValueSyntax = fromString . show
 
-    selectTableStmt setQuantifier proj from where_ grouping having =
-      MysqlSelectTableSyntax $
-      emit "SELECT " <>
-      maybe mempty (\sq' -> fromMysqlSetQuantifier sq' <> emit " ") setQuantifier <>
-      fromMysqlProjection proj <>
-      maybe mempty ((emit " FROM " <>) . fromMysqlFrom) from <>
-      maybe mempty ((emit " WHERE " <>) . fromMysqlExpression) where_ <>
-      maybe mempty ((emit " GROUP BY " <>) . fromMysqlGrouping) grouping <>
-      maybe mempty ((emit " HAVING " <>) . fromMysqlExpression) having
+instance HasSqlValueSyntax MysqlSyntax Float where
+  sqlValueSyntax = fromString . show
 
-    unionTables True  = mysqlTblOp "UNION ALL"
-    unionTables False = mysqlTblOp "UNION"
-    intersectTables _ = mysqlTblOp "INTERSECT"
-    exceptTable _ = mysqlTblOp "EXCEPT"
+instance HasSqlValueSyntax MysqlSyntax Double where
+  sqlValueSyntax = fromString . show
 
-mysqlTblOp :: Builder -> MysqlSelectTableSyntax -> MysqlSelectTableSyntax -> MysqlSelectTableSyntax
-mysqlTblOp op a b =
-    MysqlSelectTableSyntax (fromMysqlSelectTable a <> emit " " <> emit op <>
-                            emit " " <> fromMysqlSelectTable b)
+instance HasSqlValueSyntax MysqlSyntax Scientific where
+  sqlValueSyntax = MysqlSyntax . scientificBuilder
 
-instance IsSql92AggregationSetQuantifierSyntax MysqlSetQuantifierSyntax where
-    setQuantifierDistinct = MysqlSetQuantifierSyntax (emit "DISTINCT")
-    setQuantifierAll = MysqlSetQuantifierSyntax (emit "ALL")
+-- Rational is exempted, because there's no good way to do this really
 
-instance IsSql92GroupingSyntax MysqlGroupingSyntax where
-    type Sql92GroupingExpressionSyntax MysqlGroupingSyntax = MysqlExpressionSyntax
+instance (HasSqlValueSyntax MysqlSyntax a) => HasSqlValueSyntax MysqlSyntax (Maybe a) where
+  sqlValueSyntax = maybe (sqlValueSyntax SqlNull) sqlValueSyntax
 
-    groupByExpressions es =
-      MysqlGroupingSyntax $
-      mysqlSepBy (emit ", ") (map fromMysqlExpression es)
+instance HasSqlValueSyntax MysqlSyntax SqlNull where
+  sqlValueSyntax = const "NULL"
 
-instance IsSql92FromSyntax MysqlFromSyntax where
-    type Sql92FromExpressionSyntax MysqlFromSyntax = MysqlExpressionSyntax
-    type Sql92FromTableSourceSyntax MysqlFromSyntax = MysqlTableSourceSyntax
+instance HasSqlValueSyntax MysqlSyntax ByteString where
+  sqlValueSyntax = quoteWrap . fromText . decodeUtf8
 
-    fromTable tableSrc Nothing = MysqlFromSyntax (fromMysqlTableSource tableSrc)
-    fromTable tableSrc (Just (nm, cols)) =
-        MysqlFromSyntax $
-        fromMysqlTableSource tableSrc <> emit " AS " <> mysqlIdentifier nm <>
-        maybe mempty (mysqlParens . mysqlSepBy (emit ",") . fmap mysqlIdentifier) cols
+instance HasSqlValueSyntax MysqlSyntax Text where
+  sqlValueSyntax = quoteWrap . fromText
 
-    innerJoin = mysqlJoin "JOIN"
+instance HasSqlValueSyntax MysqlSyntax Day where
+  sqlValueSyntax = quoteWrap . fromString . formatShow iso8601Format
 
-    leftJoin = mysqlJoin "LEFT JOIN"
-    rightJoin = mysqlJoin "RIGHT JOIN"
+instance HasSqlValueSyntax MysqlSyntax TimeOfDay where
+  sqlValueSyntax = quoteWrap . fromString . formatShow iso8601Format
 
-instance IsSql92FromOuterJoinSyntax MysqlFromSyntax where
-    outerJoin = mysqlJoin "OUTER JOIN"
+instance HasSqlValueSyntax MysqlSyntax LocalTime where
+  sqlValueSyntax lt = quoteWrap (day <> " " <> tod)
+    where
+      day = fromString . formatShow iso8601Format . localDay $ lt
+      tod = fromString . formatShow iso8601Format . localTimeOfDay $ lt
 
-mysqlJoin :: Builder -> MysqlFromSyntax -> MysqlFromSyntax
-          -> Maybe MysqlExpressionSyntax -> MysqlFromSyntax
-mysqlJoin joinType a b (Just e) =
-    MysqlFromSyntax (fromMysqlFrom a <> emit " " <> emit joinType <> emit " " <>
-                     fromMysqlFrom b <> emit " ON " <> fromMysqlExpression e)
-mysqlJoin joinType a b Nothing =
-    MysqlFromSyntax (fromMysqlFrom a <> emit " " <> emit joinType <>
-                     emit " " <> fromMysqlFrom b)
+instance HasSqlValueSyntax MysqlSyntax NominalDiffTime where
+  sqlValueSyntax d =
+    let dWhole :: Int = abs . floor $ d
+        hours :: Int = dWhole `div` 3600
+        d' = dWhole - (hours * 3600)
+        minutes = d' `div` 60
+        seconds = abs d - fromIntegral ((hours * 3600) + (minutes * 60))
+        secondsFixed :: Fixed E12 = fromRational . toRational $ seconds
+      in
+        MysqlSyntax ((if d < 0 then "-" else mempty) <>
+                     (if hours < 10 then "0" else mempty) <>
+                     (fromString . show $ hours) <>
+                     ":" <>
+                     (if minutes < 10 then "0" else mempty) <>
+                     (fromString . show $ minutes) <>
+                     ":" <>
+                     (if secondsFixed < 10 then "0" else mempty) <>
+                     (fromString . showFixed False $ secondsFixed))
 
-instance IsSql92TableSourceSyntax MysqlTableSourceSyntax where
-    type Sql92TableSourceSelectSyntax MysqlTableSourceSyntax = MysqlSelectSyntax
-    type Sql92TableSourceTableNameSyntax MysqlTableSourceSyntax = MysqlTableNameSyntax
-    type Sql92TableSourceExpressionSyntax MysqlTableSourceSyntax = MysqlExpressionSyntax
+instance HasSqlValueSyntax MysqlSyntax Value where
+  sqlValueSyntax = quoteWrap . encodeToTextBuilder
 
-    tableNamed t = MysqlTableSourceSyntax (fromMysqlTableName t)
-    tableFromSubSelect s = MysqlTableSourceSyntax (emit "(" <> fromMysqlSelect s <> emit ")")
-    tableFromValues vss = MysqlTableSourceSyntax . mysqlParens $
-                          mysqlSepBy (emit " UNION ")
-                            (map (mappend (emit "SELECT ") . mysqlSepBy (emit ", ") .
-                                    map (mysqlParens . fromMysqlExpression)) vss)
+-- Extra convenience instances
 
-instance IsSql92OrderingSyntax MysqlOrderingSyntax where
-    type Sql92OrderingExpressionSyntax MysqlOrderingSyntax = MysqlExpressionSyntax
+instance HasSqlValueSyntax MysqlSyntax Integer where
+  sqlValueSyntax = fromString . show
 
-    ascOrdering e = MysqlOrderingSyntax (fromMysqlExpression e <> emit " ASC")
-    descOrdering e = MysqlOrderingSyntax (fromMysqlExpression e <> emit " DESC")
+instance HasSqlValueSyntax MysqlSyntax String where
+  sqlValueSyntax = fromString
 
+instance HasSqlValueSyntax MysqlSyntax TL.Text where
+  sqlValueSyntax = MysqlSyntax . fromLazyText
+
+-- Syntax defs
+
+instance IsSql92FieldNameSyntax MysqlSyntax where
+  unqualifiedField = backtickWrap . fromText
+  qualifiedField qual f =
+    (backtickWrap . fromText $ qual) <>
+    "." <>
+    unqualifiedField f
+
+instance IsSql92QuantifierSyntax MysqlSyntax where
+  quantifyOverAll = "ALL"
+  quantifyOverAny = "ANY"
+
+instance IsSql92DataTypeSyntax MysqlDataTypeSyntax where
+  domainType t = MysqlDataTypeSyntax go go
+    where
+      go = backtickWrap . fromText $ t
+  charType mlen mcs = MysqlDataTypeSyntax def "CHAR"
+    where
+      def = "CHAR" <> charLen mlen <> charSet mcs
+  varCharType mlen mcs = MysqlDataTypeSyntax def "CHAR"
+    where
+      def = "VARCHAR" <> charLen mlen <> charSet mcs
+  nationalCharType mlen = MysqlDataTypeSyntax def "CHAR"
+    where
+      def = "NATIONAL CHAR" <> charLen mlen
+  nationalVarCharType mlen = MysqlDataTypeSyntax def "CHAR"
+    where
+      def = "NATIONAL CHAR VARYING" <> charLen mlen
+  bitType mlen = MysqlDataTypeSyntax def "BINARY"
+    where
+      def = "BIT" <> charLen mlen
+  varBitType mlen = MysqlDataTypeSyntax def "BINARY"
+    where
+      def = "VARBINARY" <> charLen mlen
+  numericType mprec = MysqlDataTypeSyntax ("NUMERIC" <> prec) ("DECIMAL" <> prec)
+    where
+      prec = numPrec mprec
+  decimalType mprec = MysqlDataTypeSyntax go go
+    where
+      go = "DECIMAL" <> numPrec mprec
+  intType = MysqlDataTypeSyntax "INT" "INTEGER"
+  smallIntType = MysqlDataTypeSyntax "SMALL INT" "INTEGER"
+  floatType mprec = MysqlDataTypeSyntax def "DECIMAL"
+    where
+      def = "FLOAT" <> foldMap (bracketWrap . fromString . show) mprec
+  doubleType = MysqlDataTypeSyntax "DOUBLE" "DECIMAL"
+  realType = MysqlDataTypeSyntax "REAL" "DECIMAL"
+  dateType = MysqlDataTypeSyntax "DATE" "DATE"
+  timeType _ _ = MysqlDataTypeSyntax "TIME" "TIME"
+  timestampType _ _ = MysqlDataTypeSyntax "TIMESTAMP" "DATETIME"
+
+instance IsSql92ExtractFieldSyntax MysqlSyntax where
+  secondsField = "SECOND"
+  minutesField = "MINUTE"
+  hourField = "HOUR"
+  dayField = "DAY"
+  monthField = "MONTH"
+  yearField = "YEAR"
+
+instance IsSql92ExpressionSyntax MysqlSyntax where
+  type Sql92ExpressionValueSyntax MysqlSyntax = MysqlSyntax
+  type Sql92ExpressionFieldNameSyntax MysqlSyntax = MysqlSyntax
+  type Sql92ExpressionQuantifierSyntax MysqlSyntax = MysqlSyntax
+  type Sql92ExpressionCastTargetSyntax MysqlSyntax = MysqlDataTypeSyntax
+  type Sql92ExpressionExtractFieldSyntax MysqlSyntax = MysqlSyntax
+  type Sql92ExpressionSelectSyntax MysqlSyntax = MysqlSyntax
+  addE = binOp "+"
+  subE = binOp "-"
+  mulE = binOp "*"
+  divE = binOp "/"
+  modE = binOp "%"
+  orE = binOp "OR"
+  andE = binOp "AND"
+  likeE = binOp "LIKE"
+  overlapsE = binOp "OVERLAPS"
+  eqE = compOp "="
+  neqE = compOp "<>"
+  ltE = compOp "<"
+  gtE = compOp ">"
+  leE = compOp "<="
+  geE = compOp ">="
+  negateE = unaryOp "-"
+  notE = unaryOp "NOT"
+  existsE (MysqlSyntax e) = "EXISTS" <> bracketWrap e
+  uniqueE (MysqlSyntax e) = "UNIQUE" <> bracketWrap e
+  isNotNullE = postfix "IS NOT NULL"
+  isNullE = postfix "IS NULL"
+  isTrueE = postfix "IS TRUE"
+  isFalseE = postfix "IS FALSE"
+  isNotTrueE = postfix "IS NOT TRUE"
+  isNotFalseE = postfix "IS NOT FALSE"
+  isUnknownE = postfix "IS UNKNOWN"
+  isNotUnknownE = postfix "IS NOT UNKNOWN"
+  betweenE (MysqlSyntax arg) (MysqlSyntax lo) (MysqlSyntax hi) =
+    bracketWrap arg <> " BETWEEN " <> bracketWrap lo <> " AND " <> bracketWrap hi
+  valueE = id
+  rowE vals = bracketWrap go
+    where
+      MysqlSyntax go = fold . intersperse ", " $ vals
+  fieldE = id
+  subqueryE (MysqlSyntax e) = bracketWrap e
+  positionE (MysqlSyntax needle) (MysqlSyntax haystack) =
+    "POSITION" <> bracketWrap (needle' <> " IN " <> haystack')
+    where
+      MysqlSyntax needle' = bracketWrap needle
+      MysqlSyntax haystack' = bracketWrap haystack
+  nullIfE (MysqlSyntax l) (MysqlSyntax r) = "NULLIF" <> bracketWrap (l <> ", " <> r)
+  absE (MysqlSyntax x) = "ABS" <> bracketWrap x
+  bitLengthE (MysqlSyntax x) = "BIT_LENGTH" <> bracketWrap x
+  charLengthE (MysqlSyntax x) = "CHAR_LENGTH" <> bracketWrap x
+  octetLengthE (MysqlSyntax x) = "OCTET_LENGTH" <> bracketWrap x
+  coalesceE es = "COALESCE" <> bracketWrap go
+    where
+      MysqlSyntax go = fold . intersperse ", " $ es
+  extractE (MysqlSyntax field) (MysqlSyntax from) =
+    "EXTRACT" <> bracketWrap (field <> " FROM " <> go)
+    where MysqlSyntax go = bracketWrap from
+  castE (MysqlSyntax e) to =
+    "CAST" <> bracketWrap (go <> " AS " <> castTarget)
+    where
+      MysqlSyntax go = bracketWrap e
+      MysqlSyntax castTarget = mysqlTypeCast to
+  caseE cases def =
+    "CASE " <> foldMap go cases <> "ELSE " <> def <> " END"
+    where go (cond, res) = "WHEN " <> cond <> " THEN " <> res <> " "
+  currentTimestampE = "CURRENT_TIMESTAMP"
+  defaultE = "DEFAULT"
+  inE (MysqlSyntax e) es =
+    bracketWrap e <> " IN " <> bracketWrap go
+    where (MysqlSyntax go) = fold . intersperse ", " $ es
+  trimE (MysqlSyntax x) = "TRIM" <> bracketWrap x
+  lowerE (MysqlSyntax x) = "LOWER" <> bracketWrap x
+  upperE (MysqlSyntax x) = "UPPER" <> bracketWrap x
+
+instance IsSql92AggregationSetQuantifierSyntax MysqlSyntax where
+  setQuantifierDistinct = "DISTINCT"
+  setQuantifierAll = "ALL"
+
+instance IsSql92AggregationExpressionSyntax MysqlSyntax where
+  type Sql92AggregationSetQuantifierSyntax MysqlSyntax = MysqlSyntax
+  countAllE = "COUNT(*)"
+  countE = unaryAggregation "COUNT"
+  avgE = unaryAggregation "AVG"
+  sumE = unaryAggregation "SUM"
+  minE = unaryAggregation "MIN"
+  maxE = unaryAggregation "MAX"
+
+instance IsSql92ProjectionSyntax MysqlSyntax where
+  type Sql92ProjectionExpressionSyntax MysqlSyntax = MysqlSyntax
+  projExprs exprs = fold . intersperse ", " . fmap go $ exprs
+    where
+      go (expr, name) =
+        expr <> foldMap (\name' -> " AS " <> (backtickWrap . fromText $ name')) name
 
 instance IsSql92TableNameSyntax MysqlTableNameSyntax where
   tableName = MysqlTableNameSyntax
 
-instance IsSql92FieldNameSyntax MysqlFieldNameSyntax where
-    qualifiedField a b =
-      MysqlFieldNameSyntax $
-      mysqlIdentifier a <> emit "." <> mysqlIdentifier b
-    unqualifiedField b =
-      MysqlFieldNameSyntax (mysqlIdentifier b)
+instance IsSql92TableSourceSyntax MysqlSyntax where
+  type Sql92TableSourceTableNameSyntax MysqlSyntax = MysqlTableNameSyntax
+  type Sql92TableSourceSelectSyntax MysqlSyntax = MysqlSyntax
+  type Sql92TableSourceExpressionSyntax MysqlSyntax = MysqlSyntax
+  tableNamed = intoTableName
+  tableFromSubSelect (MysqlSyntax s) = bracketWrap s
+  tableFromValues =
+    bracketWrap . fold . intersperse " UNION " . fmap (\vals -> "SELECT " <> go vals)
+    where go = fold . intersperse ", " . fmap (\(MysqlSyntax e) -> "(" <> e <> ")")
 
--- | Note: MySQL does not allow timezones in date/time types
-instance IsSql92DataTypeSyntax MysqlDataTypeSyntax where
-  domainType t = MysqlDataTypeSyntax (mysqlIdentifier t) (mysqlIdentifier t)
-  charType len cs = MysqlDataTypeSyntax (emit "CHAR(" <> mysqlCharLen len <> emit ")" <> mysqlOptCharSet cs) (emit "CHAR")
-  varCharType len cs = MysqlDataTypeSyntax (emit "VARCHAR(" <> mysqlCharLen len <> emit ")" <> mysqlOptCharSet cs) (emit "CHAR")
-  nationalCharType len = MysqlDataTypeSyntax (emit "NATIONAL CHAR(" <> mysqlCharLen  len <> emit ")") (emit "CHAR")
-  nationalVarCharType len = MysqlDataTypeSyntax (emit "NATIONAL CHAR VARYING(" <> mysqlCharLen len <> emit ")") (emit "CHAR")
-  bitType len = MysqlDataTypeSyntax (emit "BIT(" <> mysqlCharLen len <> emit ")") (emit "BINARY")
-  varBitType len = MysqlDataTypeSyntax (emit "VARBINARY(" <> mysqlCharLen len <> emit ")") (emit "BINARY")
-  numericType prec = MysqlDataTypeSyntax (emit "NUMERIC" <> mysqlNumPrec prec) (emit "DECIMAL" <> mysqlNumPrec prec)
-  decimalType prec = MysqlDataTypeSyntax ty ty
-    where ty = emit "DECIMAL" <> mysqlNumPrec prec
-  intType = MysqlDataTypeSyntax (emit "INT") (emit "INTEGER")
-  smallIntType = MysqlDataTypeSyntax (emit "SMALL INT") (emit "INTEGER")
-  floatType prec = MysqlDataTypeSyntax (emit "FLOAT" <> maybe mempty (mysqlParens . emit . fromString . show) prec) (emit "DECIMAL")
-  doubleType = MysqlDataTypeSyntax (emit "DOUBLE") (emit "DECIMAL")
-  realType = MysqlDataTypeSyntax (emit "REAL") (emit "DECIMAL")
+instance IsSql92FromSyntax MysqlSyntax where
+  type Sql92FromTableSourceSyntax MysqlSyntax = MysqlSyntax
+  type Sql92FromExpressionSyntax MysqlSyntax = MysqlSyntax
+  fromTable tableE = \case
+    Nothing -> tableE
+    Just (name, cols) ->
+      tableE <>
+      " AS " <>
+      (backtickWrap . fromText $ name) <>
+      foldMap (go . fold . intersperse ", " . fmap (backtickWrap . fromText)) cols
+    where go (MysqlSyntax e) = bracketWrap e
+  innerJoin = joinOp "JOIN"
+  leftJoin = joinOp "LEFT JOIN"
+  rightJoin = joinOp "RIGHT JOIN"
 
-  dateType = MysqlDataTypeSyntax ty ty
-    where ty = emit "DATE"
-  timeType _prec _withTimeZone = MysqlDataTypeSyntax ty ty
-    where ty = emit "TIME"
-  timestampType _prec _withTimeZone = MysqlDataTypeSyntax (emit "TIMESTAMP") (emit "DATETIME")
+instance IsSql92GroupingSyntax MysqlSyntax where
+  type Sql92GroupingExpressionSyntax MysqlSyntax = MysqlSyntax
+  groupByExpressions = fold . intersperse ", "
 
-instance IsSql92ProjectionSyntax MysqlProjectionSyntax where
-    type Sql92ProjectionExpressionSyntax MysqlProjectionSyntax = MysqlExpressionSyntax
+instance IsSql92SelectTableSyntax MysqlSyntax where
+  type Sql92SelectTableSelectSyntax MysqlSyntax = MysqlSyntax
+  type Sql92SelectTableExpressionSyntax MysqlSyntax = MysqlSyntax
+  type Sql92SelectTableProjectionSyntax MysqlSyntax = MysqlSyntax
+  type Sql92SelectTableFromSyntax MysqlSyntax = MysqlSyntax
+  type Sql92SelectTableGroupingSyntax MysqlSyntax = MysqlSyntax
+  type Sql92SelectTableSetQuantifierSyntax MysqlSyntax = MysqlSyntax
+  selectTableStmt quant proj from wher grouping having =
+    "SELECT " <>
+    foldMap (<> " ") quant <>
+    proj <>
+    foldMap (" FROM " <>) from <>
+    foldMap (" WHERE " <>) wher <>
+    foldMap (" GROUP BY " <>) grouping <>
+    foldMap (" HAVING " <>) having
+  unionTables isAll = if isAll
+    then tableOp "UNION ALL"
+    else tableOp "UNION"
+  intersectTables _ = tableOp "INTERSECT"
+  exceptTable _ = tableOp "EXCEPT"
 
-    projExprs exprs =
-        MysqlProjectionSyntax $
-        mysqlSepBy (emit ", ")
-                   (map (\(expr, nm) ->
-                             fromMysqlExpression expr <>
-                             maybe mempty
-                                   (\nm' -> emit " AS " <> mysqlIdentifier nm') nm)
-                        exprs)
+instance IsSql92OrderingSyntax MysqlSyntax where
+  type Sql92OrderingExpressionSyntax MysqlSyntax = MysqlSyntax
+  ascOrdering = (<> " ASC")
+  descOrdering = (<> " DESC")
 
-instance IsCustomSqlSyntax MysqlExpressionSyntax where
-    newtype CustomSqlSyntax MysqlExpressionSyntax =
-        MysqlCustomExpressionSyntax { fromMysqlCustomExpression :: MysqlSyntax }
-        deriving (Monoid, Semigroup)
-    customExprSyntax = MysqlExpressionSyntax . fromMysqlCustomExpression
-    renderSyntax = MysqlCustomExpressionSyntax . mysqlParens . fromMysqlExpression
+instance IsSql92SelectSyntax MysqlSyntax where
+  type Sql92SelectSelectTableSyntax MysqlSyntax = MysqlSyntax
+  type Sql92SelectOrderingSyntax MysqlSyntax = MysqlSyntax
+  selectStmt tbl ordering limit offset =
+    tbl <>
+    (case ordering of
+      []      -> mempty
+      clauses -> " ORDER BY " <> (fold . intersperse ", " $ clauses)) <>
+    case (limit, offset) of
+      (Just limit', Just offset') ->
+        " LIMIT " <>
+        (fromString . show $ offset') <>
+        ", " <>
+        (fromString . show $ limit')
+      (Just limit', Nothing)      -> " LIMIT " <> (fromString . show $ limit')
+      _                           -> mempty
 
-instance IsString (CustomSqlSyntax MysqlExpressionSyntax) where
-    fromString = MysqlCustomExpressionSyntax . emit . fromString
+instance IsSql92InsertValuesSyntax MysqlSyntax where
+  type Sql92InsertValuesExpressionSyntax MysqlSyntax = MysqlSyntax
+  type Sql92InsertValuesSelectSyntax MysqlSyntax = MysqlSyntax
+  insertSqlExpressions es = "VALUES " <> (fold . intersperse ", " . fmap go $ es)
+    where go exprs = "(" <> (fold . intersperse ", " $ exprs) <> ")"
+  insertFromSql = id
 
-instance IsSql92ExpressionSyntax MysqlExpressionSyntax where
-    type Sql92ExpressionValueSyntax MysqlExpressionSyntax = MysqlValueSyntax
-    type Sql92ExpressionSelectSyntax MysqlExpressionSyntax = MysqlSelectSyntax
-    type Sql92ExpressionFieldNameSyntax MysqlExpressionSyntax = MysqlFieldNameSyntax
-    type Sql92ExpressionQuantifierSyntax MysqlExpressionSyntax = MysqlComparisonQuantifierSyntax
-    type Sql92ExpressionCastTargetSyntax MysqlExpressionSyntax = MysqlDataTypeSyntax
-    type Sql92ExpressionExtractFieldSyntax MysqlExpressionSyntax = MysqlExtractFieldSyntax
+instance IsSql92InsertSyntax MysqlSyntax where
+  type Sql92InsertValuesSyntax MysqlSyntax = MysqlSyntax
+  type Sql92InsertTableNameSyntax MysqlSyntax = MysqlTableNameSyntax
+  insertStmt tblName fields values =
+    "INSERT INTO " <>
+    intoTableName tblName <>
+    "(" <>
+    (fold . intersperse ", " . fmap (backtickWrap . fromText) $ fields) <>
+    ") " <>
+    values
 
-    addE = mysqlBinOp "+"; subE = mysqlBinOp "-"
-    mulE = mysqlBinOp "*"; divE = mysqlBinOp "/"; modE = mysqlBinOp "%"
+instance IsSql92UpdateSyntax MysqlSyntax where
+  type Sql92UpdateExpressionSyntax MysqlSyntax = MysqlSyntax
+  type Sql92UpdateFieldNameSyntax MysqlSyntax = MysqlSyntax
+  type Sql92UpdateTableNameSyntax MysqlSyntax = MysqlTableNameSyntax
+  updateStmt tblName fields wher =
+    "UPDATE " <>
+    intoTableName tblName <>
+    (case fields of
+      [] -> mempty
+      _  -> " SET " <> (fold . intersperse ", " . fmap go $ fields)) <>
+    foldMap (" WHERE " <>) wher
+    where go (field, val) = field <> "=" <> val
 
-    orE = mysqlBinOp "OR"; andE = mysqlBinOp "AND"
-    likeE = mysqlBinOp "LIKE"; overlapsE = mysqlBinOp "OVERLAPS"
+instance IsSql92DeleteSyntax MysqlSyntax where
+  type Sql92DeleteTableNameSyntax MysqlSyntax = MysqlTableNameSyntax
+  type Sql92DeleteExpressionSyntax MysqlSyntax = MysqlSyntax
+  deleteStmt tblName _ wher =
+    "DELETE FROM " <>
+    intoTableName tblName <>
+    foldMap (" WHERE " <>) wher
+  deleteSupportsAlias = const False
 
-    eqE = mysqlCompOp "="; neqE = mysqlCompOp "<>"
-    ltE = mysqlCompOp "<"; gtE = mysqlCompOp ">"
-    leE = mysqlCompOp "<="; geE = mysqlCompOp ">="
+instance IsSql92Syntax MysqlSyntax where
+  type Sql92SelectSyntax MysqlSyntax = MysqlSyntax
+  type Sql92InsertSyntax MysqlSyntax = MysqlSyntax
+  type Sql92UpdateSyntax MysqlSyntax = MysqlSyntax
+  type Sql92DeleteSyntax MysqlSyntax = MysqlSyntax
+  selectCmd = id
+  insertCmd = id
+  updateCmd = id
+  deleteCmd = id
 
-    negateE = mysqlUnOp "-"; notE = mysqlUnOp "NOT"
-
-    existsE s = MysqlExpressionSyntax (emit "EXISTS(" <> fromMysqlSelect s <> emit ")")
-    uniqueE s = MysqlExpressionSyntax (emit "UNIQUE(" <> fromMysqlSelect s <> emit ")")
-
-    isNotNullE = mysqlPostFix "IS NOT NULL"; isNullE = mysqlPostFix "IS NULL"
-    isTrueE = mysqlPostFix "IS TRUE"; isFalseE = mysqlPostFix "IS FALSE"
-    isNotTrueE = mysqlPostFix "IS NOT TRUE"; isNotFalseE = mysqlPostFix "IS NOT FALSE"
-    isUnknownE = mysqlPostFix "IS UNKNOWN"; isNotUnknownE = mysqlPostFix "IS NOT UNKNOWN"
-
-    betweenE a b c =
-        MysqlExpressionSyntax (emit "(" <> fromMysqlExpression a <> emit ") BETWEEN (" <>
-                               fromMysqlExpression b <> emit ") AND (" <>
-                               fromMysqlExpression c <> emit ")")
-
-    valueE e = MysqlExpressionSyntax (fromMysqlValue e)
-    rowE vs =
-        MysqlExpressionSyntax (emit "(" <> mysqlSepBy (emit ", ") (map fromMysqlExpression vs) <> emit ")")
-    fieldE fn = MysqlExpressionSyntax (fromMysqlFieldName fn)
-    subqueryE s = MysqlExpressionSyntax (emit "(" <> fromMysqlSelect s <> emit ")")
-
-    positionE needle haystack =
-        MysqlExpressionSyntax $
-        emit "POSITION((" <> fromMysqlExpression needle <> emit ") IN (" <>
-        fromMysqlExpression haystack <> emit "))"
-
-    nullIfE a b =
-        MysqlExpressionSyntax $
-        emit "NULLIF(" <> fromMysqlExpression a <> emit ", " <>
-        fromMysqlExpression b <> emit ")"
-
-    absE a = MysqlExpressionSyntax (emit "ABS(" <> fromMysqlExpression a <> emit ")")
-    bitLengthE a = MysqlExpressionSyntax (emit "BIT_LENGTH(" <> fromMysqlExpression a <> emit ")")
-    charLengthE a = MysqlExpressionSyntax (emit "CHAR_LENGTH(" <> fromMysqlExpression a <> emit ")")
-    octetLengthE a = MysqlExpressionSyntax (emit "OCTET_LENGTH(" <> fromMysqlExpression a <> emit ")")
-    coalesceE es = MysqlExpressionSyntax (emit "COALESCE(" <>
-                                          mysqlSepBy (emit ", ")
-                                              (map fromMysqlExpression es) <>
-                                          emit ")")
-    extractE field from = MysqlExpressionSyntax (emit "EXTRACT(" <> fromMysqlExtractField field <>
-                                                 emit " FROM (" <> fromMysqlExpression from <> emit ")")
-    castE e to = MysqlExpressionSyntax (emit "CAST((" <> fromMysqlExpression e <> emit ") AS " <>
-                                        fromMysqlDataTypeCast to <> emit ")")
-    caseE cases else' =
-        MysqlExpressionSyntax $
-        emit "CASE " <>
-        foldMap (\(cond, res) -> emit "WHEN " <> fromMysqlExpression cond <>
-                                 emit " THEN " <> fromMysqlExpression res <>
-                                 emit " ") cases <>
-        emit "ELSE " <> fromMysqlExpression else' <> emit " END"
-
-    currentTimestampE = MysqlExpressionSyntax (emit "CURRENT_TIMESTAMP")
-    defaultE = MysqlExpressionSyntax (emit "DEFAULT")
-
-    inE e es = MysqlExpressionSyntax $
-               emit "(" <> fromMysqlExpression e <> emit ") IN ( " <>
-               mysqlSepBy (emit ", ") (map fromMysqlExpression es) <> emit ")"
-
-    trimE x = MysqlExpressionSyntax (emit "TRIM(" <> fromMysqlExpression x <> emit ")")
-    lowerE x = MysqlExpressionSyntax (emit "LOWER(" <> fromMysqlExpression x <> emit ")")
-    upperE x = MysqlExpressionSyntax (emit "UPPER(" <> fromMysqlExpression x <> emit ")")
-
-instance IsSql92ExtractFieldSyntax MysqlExtractFieldSyntax where
-  secondsField = MysqlExtractFieldSyntax (emit "SECOND")
-  minutesField = MysqlExtractFieldSyntax (emit "MINUTE")
-  hourField    = MysqlExtractFieldSyntax (emit "HOUR")
-  dayField     = MysqlExtractFieldSyntax (emit "DAY")
-  monthField   = MysqlExtractFieldSyntax (emit "MONTH")
-  yearField    = MysqlExtractFieldSyntax (emit "YEAR")
-
-instance IsSql99ConcatExpressionSyntax MysqlExpressionSyntax where
-    concatE [] = valueE (sqlValueSyntax ("" :: T.Text))
-    concatE xs =
-        MysqlExpressionSyntax . mconcat $
-        [ emit "CONCAT("
-        , mysqlSepBy (emit ", ") (map fromMysqlExpression xs)
-        , emit ")" ]
-
-mysqlUnOp :: Builder -> MysqlExpressionSyntax -> MysqlExpressionSyntax
-mysqlUnOp op e = MysqlExpressionSyntax (emit op <> emit " (" <>
-                                        fromMysqlExpression e <> emit ")")
-
-mysqlPostFix :: Builder -> MysqlExpressionSyntax -> MysqlExpressionSyntax
-mysqlPostFix op e = MysqlExpressionSyntax (emit "(" <> fromMysqlExpression e <>
-                                           emit ") " <> emit op)
-
-mysqlCompOp :: Builder -> Maybe MysqlComparisonQuantifierSyntax
-            -> MysqlExpressionSyntax -> MysqlExpressionSyntax
-            -> MysqlExpressionSyntax
-mysqlCompOp op quantifier a b =
-    MysqlExpressionSyntax $
-    emit "(" <> fromMysqlExpression a <>
-    emit ") " <> emit op <>
-    maybe mempty (\q -> emit " " <> fromMysqlComparisonQuantifier q <> emit " ") quantifier <>
-    emit " (" <> fromMysqlExpression b <> emit ")"
-
-mysqlBinOp :: Builder -> MysqlExpressionSyntax
-           -> MysqlExpressionSyntax -> MysqlExpressionSyntax
-mysqlBinOp op a b =
-    MysqlExpressionSyntax $
-    emit "(" <> fromMysqlExpression a <> emit ") " <> emit op <>
-    emit " (" <> fromMysqlExpression b <> emit ")"
-
-instance IsSql92AggregationExpressionSyntax MysqlExpressionSyntax where
-    type Sql92AggregationSetQuantifierSyntax MysqlExpressionSyntax = MysqlSetQuantifierSyntax
-
-    countAllE = MysqlExpressionSyntax (emit "COUNT(*)")
-    countE = mysqlUnAgg "COUNT"
-    avgE = mysqlUnAgg "AVG"
-    sumE = mysqlUnAgg "SUM"
-    minE = mysqlUnAgg "MIN"
-    maxE = mysqlUnAgg "MAX"
-
-mysqlUnAgg :: Builder -> Maybe MysqlSetQuantifierSyntax
-           -> MysqlExpressionSyntax -> MysqlExpressionSyntax
-mysqlUnAgg fn q e =
-    MysqlExpressionSyntax $
-    emit fn <> emit "(" <>
-    maybe mempty (\q' -> fromMysqlSetQuantifier q' <> emit " ") q <>
-    fromMysqlExpression e <> emit")"
-
-instance IsSql92QuantifierSyntax MysqlComparisonQuantifierSyntax where
-    quantifyOverAll = MysqlComparisonQuantifierSyntax (emit "ALL")
-    quantifyOverAny = MysqlComparisonQuantifierSyntax (emit "ANY")
-
-instance HasSqlValueSyntax MysqlValueSyntax SqlNull where
-    sqlValueSyntax _ = MysqlValueSyntax $ emit "NULL"
-instance HasSqlValueSyntax MysqlValueSyntax Bool where
-    sqlValueSyntax True  = MysqlValueSyntax $ emit "TRUE"
-    sqlValueSyntax False = MysqlValueSyntax $ emit "FALSE"
-
-instance HasSqlValueSyntax MysqlValueSyntax Double where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (doubleDec d)
-instance HasSqlValueSyntax MysqlValueSyntax Float where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (floatDec d)
-
-instance HasSqlValueSyntax MysqlValueSyntax Int where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (intDec d)
-instance HasSqlValueSyntax MysqlValueSyntax Int8 where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (int8Dec d)
-instance HasSqlValueSyntax MysqlValueSyntax Int16 where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (int16Dec d)
-instance HasSqlValueSyntax MysqlValueSyntax Int32 where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (int32Dec d)
-instance HasSqlValueSyntax MysqlValueSyntax Int64 where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (int64Dec d)
-instance HasSqlValueSyntax MysqlValueSyntax Integer where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (integerDec d)
-
-instance HasSqlValueSyntax MysqlValueSyntax Word where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (wordDec d)
-instance HasSqlValueSyntax MysqlValueSyntax Word8 where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (word8Dec d)
-instance HasSqlValueSyntax MysqlValueSyntax Word16 where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (word16Dec d)
-instance HasSqlValueSyntax MysqlValueSyntax Word32 where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (word32Dec d)
-instance HasSqlValueSyntax MysqlValueSyntax Word64 where
-    sqlValueSyntax d = MysqlValueSyntax $ emit (word64Dec d)
-
-instance HasSqlValueSyntax MysqlValueSyntax T.Text where
-    sqlValueSyntax t =
-        MysqlValueSyntax $ MysqlSyntax
-        (\next doEscape before conn ->
-             do escaped <- doEscape (TE.encodeUtf8 t)
-                next doEscape (before <> "'" <> byteString escaped <> "'") conn)
-instance HasSqlValueSyntax MysqlValueSyntax TL.Text where
-    sqlValueSyntax = sqlValueSyntax . TL.toStrict
-instance HasSqlValueSyntax MysqlValueSyntax [Char] where
-    sqlValueSyntax = sqlValueSyntax . T.pack
-
-instance HasSqlValueSyntax MysqlValueSyntax ByteString where
-    sqlValueSyntax t =
-        MysqlValueSyntax $ MysqlSyntax
-        (\next doEscape before conn ->
-             do escaped <- doEscape t
-                next doEscape (before <> "'" <> byteString escaped <> "'") conn)
-
-instance HasSqlValueSyntax MysqlValueSyntax Scientific where
-    sqlValueSyntax = MysqlValueSyntax . emit . scientificBuilder
-
-instance HasSqlValueSyntax MysqlValueSyntax Day where
-    sqlValueSyntax d = MysqlValueSyntax (emit ("'" <> dayBuilder d <> "'"))
-
-instance HasSqlValueSyntax MysqlValueSyntax TimeOfDay where
-    sqlValueSyntax d = MysqlValueSyntax (emit ("'" <> todBuilder d <> "'"))
-
-dayBuilder :: Day -> Builder
-dayBuilder d =
-    integerDec year <> "-" <>
-    (if month < 10 then "0" else mempty) <> intDec month <> "-" <>
-    (if day   < 10 then "0" else mempty) <> intDec day
-  where
-    (year, month, day) = toGregorian d
-
-todBuilder :: TimeOfDay -> Builder
-todBuilder d =
-    (if todHour d < 10 then "0" else mempty) <> intDec (todHour d) <> ":" <>
-    (if todMin  d < 10 then "0" else mempty) <> intDec (todMin  d) <> ":" <>
-    (if secs6 < 10 then "0" else mempty) <> fromString (showFixed False secs6)
-  where
-    secs6 :: Fixed E6
-    secs6 = fromRational (toRational (todSec d))
-
-instance HasSqlValueSyntax MysqlValueSyntax NominalDiffTime where
-    sqlValueSyntax d =
-        let dWhole = abs (floor d) :: Int
-            hours   = dWhole `div` 3600 :: Int
-
-            d' = dWhole - (hours * 3600)
-            minutes = d' `div` 60
-
-            seconds = abs d - fromIntegral ((hours * 3600) + (minutes * 60))
-
-            secondsFixed :: Fixed E12
-            secondsFixed = fromRational (toRational seconds)
-        in
-          MysqlValueSyntax $
-          emit ((if d < 0 then "-" else mempty) <>
-                (if hours < 10 then "0" else mempty) <> intDec hours <> ":" <>
-                (if minutes < 10 then "0" else mempty) <> intDec minutes <> ":" <>
-                (if secondsFixed < 10 then "0" else mempty) <> fromString (showFixed False secondsFixed))
-
-instance HasSqlValueSyntax MysqlValueSyntax LocalTime where
-    sqlValueSyntax d = MysqlValueSyntax (emit ("'" <> dayBuilder (localDay d) <>
-                                               " " <> todBuilder (localTimeOfDay d) <> "'"))
-
-instance HasSqlValueSyntax MysqlValueSyntax x => HasSqlValueSyntax MysqlValueSyntax (Maybe x) where
-    sqlValueSyntax Nothing  = sqlValueSyntax SqlNull
-    sqlValueSyntax (Just x) = sqlValueSyntax x
-
-instance HasSqlValueSyntax MysqlValueSyntax A.Value where
-    sqlValueSyntax = MysqlValueSyntax . (\x -> emit "'" <> x <> emit "'") . escape . BL.toStrict . A.encode
-
-mysqlCharLen :: Maybe Word -> MysqlSyntax
-mysqlCharLen = maybe (emit "MAX") (emit . fromString . show)
-
-mysqlNumPrec :: Maybe (Word, Maybe Word) -> MysqlSyntax
-mysqlNumPrec Nothing = mempty
-mysqlNumPrec (Just (d, Nothing)) = mysqlParens (emit . fromString . show $ d)
-mysqlNumPrec (Just (d, Just n)) = mysqlParens (emit (fromString (show d)) <> emit ", " <> emit (fromString (show n)))
-
-mysqlOptCharSet :: Maybe T.Text -> MysqlSyntax
-mysqlOptCharSet Nothing   = mempty
-mysqlOptCharSet (Just cs) = emit " CHARACTER SET " <> mysqlIdentifier cs
+instance IsSql99ConcatExpressionSyntax MysqlSyntax where
+  concatE = \case
+    [] -> mempty
+    xs -> "CONCAT(" <> (fold . intersperse ", " $ xs) <> ")"
