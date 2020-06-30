@@ -4,21 +4,22 @@
 module Database.Beam.MySQL.Connection (
   MySQL(..),
   MySQLM(..),
-  NotEnoughColumns (..),
-  CouldNotReadColumn (..),
   runBeamMySQL, runBeamMySQLDebug
   ) where
 
-import           Control.Exception.Safe (Exception (..), MonadCatch, MonadMask,
-                                         MonadThrow, bracket, throwIO)
-import           Control.Monad.Except (Except, catchError, runExcept,
-                                       throwError)
+import           Control.Exception.Safe (MonadCatch, MonadMask, MonadThrow,
+                                         bracket, throwIO)
+import           Control.Monad (void)
+import           Control.Monad.Except (Except, MonadError, catchError,
+                                       runExcept, throwError)
 import           Control.Monad.Free.Church (iterM)
 import           Control.Monad.IO.Class (MonadIO (..))
-import           Control.Monad.Reader (ReaderT (..))
-import           Control.Monad.State.Strict (StateT, evalStateT, get, gets,
-                                             modify, put)
+import           Control.Monad.Reader (ReaderT (..), ask, asks, runReaderT)
+import           Control.Monad.State.Strict (StateT, evalStateT, get, modify,
+                                             put)
+import           Control.Monad.Trans (lift)
 import           Data.Aeson (Value)
+import           Data.Bifunctor (first)
 import           Data.ByteString (ByteString)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Scientific (Scientific)
@@ -39,11 +40,11 @@ import           Database.Beam.MySQL.Syntax (MysqlSyntax, intoDebugText,
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck)
 import           Database.Beam.Query.SQL92 (buildSql92Query')
-import           Database.MySQL.Base (FieldType, MySQLConn, MySQLValue,
+import           Database.MySQL.Base (FieldType, MySQLConn, MySQLValue, Query,
                                       columnType, execute_, queryVector_,
                                       skipToEof)
 import           Prelude hiding (mapM, read)
-import           System.IO.Streams (peek, read)
+import           System.IO.Streams (InputStream, peek, read)
 import           System.IO.Streams.Combinators (mapM)
 import           System.IO.Streams.List (toList)
 
@@ -211,84 +212,35 @@ newtype MySQLM a = MySQLM (ReaderT (Text -> IO (), MySQLConn) IO a)
 instance MonadFail MySQLM where
   fail err = fail ("Internal error with: " <> err)
 
-newtype NotEnoughColumns = NotEnoughColumns Int
-  deriving stock (Show)
-
 instance MonadBeam MySQL MySQLM where
-  runReturningMany sql callback = do
-    let statement = intoQuery sql
-    let debugText = intoDebugText sql
-    bracket (acquire statement debugText)
+  runNoReturn sql = do
+    (statement, conn) <- processAndLog sql
+    void . liftIO. execute_ conn $ statement
+  runReturningOne sql = do
+    (statement, conn) <- processAndLog sql
+    bracket (acquireStream conn statement)
             drainStream
-            (\(cols, stream) -> do
-              stream' <-
-                liftIO .
-                  mapM (fromSingleRow . V.zipWith (\col -> (columnType col,)) cols) $
-                  stream
-              callback (liftIO . read $ stream'))
+            (liftIO . processOneResult)
     where
-      acquire s dt = MySQLM . ReaderT $ \(dbg, conn) -> do
-        dbg dt
-        queryVector_ conn s
-      drainStream (_, stream) = liftIO . skipToEof $ stream
-  runReturningList sql = MySQLM . ReaderT $ go
-    where
-      go (dbg, conn) = do
-        let statement = intoQuery sql
-        bracket (do
-                  dbg . intoDebugText $ sql
-                  queryVector_ conn statement)
-                (\(_, stream) -> skipToEof stream)
-                (\(cols, stream) -> do
-                  stream' <-
-                    mapM (fromSingleRow . V.zipWith (\col -> (columnType col,)) cols) stream
-                  toList stream')
-  runReturningOne :: forall a . (FromBackendRow MySQL a) => MysqlSyntax -> MySQLM (Maybe a)
-  runReturningOne sql = MySQLM . ReaderT $ go
-    where
-      go (dbg, conn) = do
-        let statement = intoQuery sql
-        bracket (do
-                  dbg . intoDebugText $ sql
-                  queryVector_ conn statement)
-                (\(_, stream) -> skipToEof stream)
-                processOneResult
-      processOneResult (cols, stream) = do
+      processOneResult (fts, stream) = do
         mRes <- read stream
         case mRes of
           Nothing -> pure Nothing
           Just res -> do
             don'tCare <- peek stream
             case don'tCare of
-              Nothing ->
-                Just <$> (fromSingleRow . V.zipWith (\col -> (columnType col,)) cols $ res)
+              Nothing -> Just <$> decodeFromRow fts res
               Just _  -> pure Nothing
-  runNoReturn sql = MySQLM . ReaderT $ go
-    where
-      go (dbg, conn) = do
-        let statement = intoQuery sql
-        dbg . intoDebugText $ sql
-        _ <- liftIO . execute_ conn $ statement
-        pure ()
-
-instance Exception NotEnoughColumns where
-  displayException (NotEnoughColumns colCount) =
-    "Not enough columns when reading MySQL row. Only have " <>
-    show colCount <>
-    " column(s)."
-
-data CouldNotReadColumn = CouldNotReadColumn {
-  errColIndex   :: {-# UNPACK #-} !Int,
-  errColMessage :: !String
-  }
-  deriving stock (Show)
-
-instance Exception CouldNotReadColumn where
-  displayException e =
-    "Could not read column " <>
-    (show . errColIndex $ e) <>
-    ": " <>
-    errColMessage e
+  runReturningList sql = do
+    (statement, conn) <- processAndLog sql
+    bracket (acquireStream conn statement)
+            drainStream
+            (\(fts, stream) -> liftIO (toList =<< mapM (decodeFromRow fts) stream))
+  runReturningMany sql callback = do
+    (statement, conn) <- processAndLog sql
+    bracket (acquireStream conn statement)
+            drainStream
+            (\(fts, stream) -> callback (liftIO (read =<< mapM (decodeFromRow fts) stream)))
 
 runBeamMySQL :: MySQLConn -> MySQLM a -> IO a
 runBeamMySQL conn (MySQLM comp) = runReaderT comp (\_ -> pure (), conn)
@@ -298,25 +250,63 @@ runBeamMySQLDebug dbg conn (MySQLM comp) = runReaderT comp (dbg, conn)
 
 -- Helpers
 
-fromSingleRow :: forall a . (FromBackendRow MySQL a) => Vector (FieldType, MySQLValue) -> IO a
-fromSingleRow v = case runExcept (evalStateT (iterM go churched) v) of
+-- Removes some duplication from MonadBeam instance
+
+processAndLog :: MysqlSyntax -> MySQLM (Query, MySQLConn)
+processAndLog sql = do
+  let statement = intoQuery sql
+  (dbg, conn) <- MySQLM ask
+  liftIO . dbg . intoDebugText $ sql
+  pure (statement, conn)
+
+acquireStream :: (MonadIO m) =>
+  MySQLConn -> Query -> m (Vector FieldType, InputStream (Vector MySQLValue))
+acquireStream conn = fmap (first (V.map columnType)) . liftIO . queryVector_ conn
+
+drainStream :: (MonadIO m) => (a, InputStream b) -> m ()
+drainStream (_, stream) = liftIO . skipToEof $ stream
+
+-- Decoding from a row is complex enough to warrant its own operators and an
+-- explicit stack.
+newtype Decode a =
+  Decode (ReaderT (Vector FieldType) (ReaderT (Vector MySQLValue) (StateT Int (Except BeamRowReadError))) a)
+  deriving newtype (Functor, Applicative, Monad, MonadError BeamRowReadError)
+
+runDecode :: Decode a -> Vector FieldType -> Vector MySQLValue -> Either BeamRowReadError a
+runDecode (Decode comp) fieldTypes values =
+  runExcept (evalStateT (runReaderT (runReaderT comp fieldTypes) values) 0)
+
+captureState :: Decode Int
+captureState = Decode . lift . lift $ get
+
+restoreState :: Int -> Decode ()
+restoreState s = Decode . lift . lift $ put s
+
+currentColumn :: Decode (Int, FieldType, MySQLValue)
+currentColumn = do
+  ix <- captureState
+  ft <- Decode . asks $ (V.! ix)
+  val <- Decode . lift . asks $ (V.! ix)
+  pure (ix, ft, val)
+
+advanceColumn :: Decode ()
+advanceColumn = Decode . lift . lift $ modify (+ 1)
+
+decodeFromRow :: forall a . (FromBackendRow MySQL a) => Vector FieldType -> Vector MySQLValue -> IO a
+decodeFromRow fieldTypes values = case runDecode (iterM go churched) fieldTypes values of
   Left err  -> throwIO err
   Right val -> pure val
   where
     FromBackendRowM churched :: FromBackendRowM MySQL a = fromBackendRow
-    go :: forall b .
-      FromBackendRowF MySQL (StateT (Vector (FieldType, MySQLValue)) (Except BeamRowReadError) b) ->
-      StateT (Vector (FieldType, MySQLValue)) (Except BeamRowReadError) b
+    go :: forall b . FromBackendRowF MySQL (Decode b) -> Decode b
     go = \case
       ParseOneField callback -> do
-        current <- gets (fromField . V.head)
-        case current of
-          Left err  -> throwError . BeamRowReadError Nothing $ err
-          Right val -> do
-            modify V.tail
-            callback val
+        (ix, ft, vals) <- currentColumn
+        case fromField ft vals of
+          Left err -> throwError . BeamRowReadError (Just ix) $ err
+          Right v  -> advanceColumn >> callback v
       Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
-        captured <- get
+        captured <- captureState
         catchError (callback =<< iterM go opt1)
-                   (\_ -> put captured >> (callback =<< iterM go opt2))
+                   (\_ -> restoreState captured >> (callback =<< iterM go opt2))
       FailParseWith err -> throwError err
