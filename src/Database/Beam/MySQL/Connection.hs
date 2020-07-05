@@ -4,7 +4,7 @@
 module Database.Beam.MySQL.Connection (
   MySQL(..),
   MySQLM(..),
-  runBeamMySQL, runBeamMySQLDebug
+  runBeamMySQL, runBeamMySQLDebug, runInsertRowReturning
   ) where
 
 import           Control.Exception.Safe (MonadCatch, MonadMask, MonadThrow,
@@ -21,9 +21,16 @@ import           Control.Monad.Trans (lift)
 import           Data.Aeson (Value)
 import           Data.Bifunctor (first)
 import           Data.ByteString (ByteString)
+import           Data.Foldable (fold)
+import           Data.Functor.Identity (Identity)
+import           Data.HashMap.Strict as HM
 import           Data.Int (Int16, Int32, Int64, Int8)
+import           Data.List (intersperse)
 import           Data.Scientific (Scientific)
 import           Data.Text (Text)
+import           Data.Text.Lazy (fromStrict)
+import           Data.Text.Lazy.Builder (fromLazyText, fromText, toLazyText)
+import           Data.Text.Lazy.Encoding (encodeUtf8)
 import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
 import           Data.Vector (Vector)
 import qualified Data.Vector as V
@@ -32,21 +39,28 @@ import           Database.Beam.Backend (BeamBackend (..), BeamRowReadError (..),
                                         BeamSqlBackend, BeamSqlBackendSyntax,
                                         FromBackendRow (..),
                                         FromBackendRowF (..),
-                                        FromBackendRowM (..), MonadBeam (..))
+                                        FromBackendRowM (..), MonadBeam (..),
+                                        insertCmd)
 import           Database.Beam.Backend.SQL (BeamSqlBackendIsString, SqlNull)
 import           Database.Beam.MySQL.FromField (FromField (..))
-import           Database.Beam.MySQL.Syntax (MysqlSyntax, intoDebugText,
-                                             intoQuery)
+import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (..),
+                                             MysqlInsertValuesSyntax (..),
+                                             MysqlSyntax (..),
+                                             MysqlTableNameSyntax (..),
+                                             intoDebugText, intoQuery,
+                                             intoTableName)
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
-                                      HasSqlQuantifiedEqualityCheck)
+                                      HasSqlQuantifiedEqualityCheck,
+                                      SqlInsert (..), SqlSelect (..),
+                                      runSelectReturningOne)
 import           Database.Beam.Query.SQL92 (buildSql92Query')
-import           Database.MySQL.Base (FieldType, MySQLConn, MySQLValue, Query,
-                                      columnType, execute_, queryVector_,
-                                      skipToEof)
+import           Database.MySQL.Base (FieldType, MySQLConn, MySQLValue (..),
+                                      Query (..), columnType, execute_,
+                                      okAffectedRows, queryVector_, skipToEof)
 import           Prelude hiding (mapM, read)
 import           System.IO.Streams (InputStream, peek, read)
-import           System.IO.Streams.Combinators (mapM)
-import           System.IO.Streams.List (toList)
+import           System.IO.Streams.Combinators (foldM, mapM)
+import qualified System.IO.Streams.List as S
 
 data MySQL = MySQL
 
@@ -199,7 +213,6 @@ instance HasSqlEqualityCheck MySQL Value
 instance HasSqlQuantifiedEqualityCheck MySQL Value
 
 -- Our 'operational monad'
-
 newtype MySQLM a = MySQLM (ReaderT (Text -> IO (), MySQLConn) IO a)
   deriving newtype (Functor,
                     Applicative,
@@ -235,18 +248,85 @@ instance MonadBeam MySQL MySQLM where
     (statement, conn) <- processAndLog sql
     bracket (acquireStream conn statement)
             drainStream
-            (\(fts, stream) -> liftIO (toList =<< mapM (decodeFromRow fts) stream))
+            (\(fts, stream) -> liftIO (S.toList =<< mapM (decodeFromRow fts) stream))
   runReturningMany sql callback = do
     (statement, conn) <- processAndLog sql
     bracket (acquireStream conn statement)
             drainStream
             (\(fts, stream) -> callback (liftIO (read =<< mapM (decodeFromRow fts) stream)))
 
+-- Run without debugging
 runBeamMySQL :: MySQLConn -> MySQLM a -> IO a
 runBeamMySQL conn (MySQLM comp) = runReaderT comp (\_ -> pure (), conn)
 
+-- Run with debugging
 runBeamMySQLDebug :: (Text -> IO ()) -> MySQLConn -> MySQLM a -> IO a
 runBeamMySQLDebug dbg conn (MySQLM comp) = runReaderT comp (dbg, conn)
+
+-- This works by finding out the primary key, checking what the values affected
+-- will be, then doing the insert followed by a lookup on those values.
+--
+-- It should be fairly fast (primary keys are usually small and databases are
+-- designed around primary key comparisons being fast).
+--
+-- This does not use the last_insert_id method, as it produces very complex
+-- code, with questionable benefits (especially given that the function can
+-- cause races if used carelessly, as it is shared by connections). Essentially,
+-- it won't necessarily be faster (as autoincrements can't be found quickly,
+-- while primary keys can), and may even be slower (because we have to consider
+-- a larger set of cases, as the autoincrement field may or may not be part of
+-- the primary key). Given that we can't avoid a primary key-based lookup in
+-- almost any case, the code was simplified with this in mind.
+--
+-- This can race. Ensure you use it in a transaction!
+runInsertRowReturning :: (FromBackendRow MySQL (table Identity)) =>
+  SqlInsert MySQL table -> MySQLM (Maybe (table Identity))
+runInsertRowReturning = \case
+  SqlInsertNoRows -> pure Nothing
+  (SqlInsert _ ins@(Insert tableName fields values)) -> case values of
+    FromSQL _ -> fail "Not implemented for INSERT INTO ... SELECT ..."
+    FromExprs exprs -> case exprs of
+      []     -> pure Nothing -- should be impossible
+      [expr] -> do
+        let fieldVals =
+              HM.fromList . zipWith (\t (MysqlSyntax b) -> (t, toLazyText b)) fields $ expr
+        -- get primary key and what values would change there
+        let pkStatement = buildPkQuery tableName
+        (_, conn) <- MySQLM ask
+        pkColVals <-
+          bracket (acquireStream conn pkStatement)
+                  drainStream
+                  (liftIO . \(_, stream) -> foldM (go fieldVals) HM.empty stream)
+        -- do the insert
+        let insertStatement = insertCmd ins
+        res <- liftIO . execute_ conn . intoQuery $ insertStatement
+        case okAffectedRows res of
+          0 -> pure Nothing
+          _ -> do
+                -- do a select on that exact match returning 1
+                let queryStatement = SqlSelect . buildPkMatchQuery $ pkColVals
+                runSelectReturningOne queryStatement
+      _      -> fail "Cannot insert several rows with runInsertRowReturning"
+    where
+      go fieldVals acc v = do
+        colName <- extractColName v
+        case HM.lookup colName fieldVals of
+          Nothing  -> pure acc
+          Just val -> pure (HM.insert colName val acc)
+      extractColName v = case V.head v of
+        MySQLText t -> pure t
+        _           -> fail "Column name was not text"
+      buildPkQuery (MysqlTableNameSyntax _ name) = Query (
+        "SELECT key_column_usage.column_name " <>
+        "FROM information_schema.key_column_usage " <>
+        "WHERE table_schema = schema() " <>
+        "AND constraint_name = 'PRIMARY' " <>
+        "AND table_name = '" <> (encodeUtf8 . fromStrict $ name) <> "';")
+      buildPkMatchQuery pkColVals =
+        "SELECT * " <>
+        " FROM " <> intoTableName tableName <>
+        " WHERE " <> (fold . intersperse " AND " . fmap toPair . HM.toList $ pkColVals) <> ";"
+      toPair (colName, val) = MysqlSyntax (fromText colName <> " = " <> fromLazyText val)
 
 -- Helpers
 

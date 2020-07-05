@@ -1,7 +1,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
 
-module Database.Beam.MySQL.Syntax (MysqlSyntax, intoQuery, intoDebugText) where
+module Database.Beam.MySQL.Syntax
+(
+  MysqlSyntax (..),
+  MysqlTableNameSyntax (..),
+  MysqlInsertValuesSyntax (..),
+  MysqlInsertSyntax (..),
+  intoQuery, intoDebugText, intoTableName, bracketWrap
+) where
 
 import           Data.Aeson (Value)
 import           Data.Aeson.Text (encodeToTextBuilder)
@@ -123,6 +130,16 @@ data MysqlTableNameSyntax = MysqlTableNameSyntax
 intoTableName :: MysqlTableNameSyntax -> MysqlSyntax
 intoTableName (MysqlTableNameSyntax db name) =
   MysqlSyntax (foldMap (\t -> fromText t <> ".") db <> fromText name)
+
+-- Insert values syntax to support runInsertRowReturning
+data MysqlInsertValuesSyntax =
+  FromExprs [[MysqlSyntax]] |
+  FromSQL MysqlSyntax
+  deriving stock (Eq)
+
+-- Insert syntax to support runInsertRowReturning
+data MysqlInsertSyntax = Insert MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
+  deriving stock (Eq)
 
 -- How we convert everything types defined in FromField to MySQL syntax
 
@@ -459,23 +476,17 @@ instance IsSql92SelectSyntax MysqlSyntax where
       (Just limit', Nothing)      -> " LIMIT " <> (fromString . show $ limit')
       _                           -> mempty
 
-instance IsSql92InsertValuesSyntax MysqlSyntax where
-  type Sql92InsertValuesExpressionSyntax MysqlSyntax = MysqlSyntax
-  type Sql92InsertValuesSelectSyntax MysqlSyntax = MysqlSyntax
-  insertSqlExpressions es = "VALUES " <> (fold . intersperse ", " . fmap go $ es)
-    where go exprs = "(" <> (fold . intersperse ", " $ exprs) <> ")"
-  insertFromSql = id
 
-instance IsSql92InsertSyntax MysqlSyntax where
-  type Sql92InsertValuesSyntax MysqlSyntax = MysqlSyntax
-  type Sql92InsertTableNameSyntax MysqlSyntax = MysqlTableNameSyntax
-  insertStmt tblName fields values =
-    "INSERT INTO " <>
-    intoTableName tblName <>
-    "(" <>
-    (fold . intersperse ", " . fmap (backtickWrap . fromText) $ fields) <>
-    ") " <>
-    values
+instance IsSql92InsertValuesSyntax MysqlInsertValuesSyntax where
+  type Sql92InsertValuesExpressionSyntax MysqlInsertValuesSyntax = MysqlSyntax
+  type Sql92InsertValuesSelectSyntax MysqlInsertValuesSyntax = MysqlSyntax
+  insertSqlExpressions = FromExprs
+  insertFromSql = FromSQL
+
+instance IsSql92InsertSyntax MysqlInsertSyntax where
+  type Sql92InsertValuesSyntax MysqlInsertSyntax = MysqlInsertValuesSyntax
+  type Sql92InsertTableNameSyntax MysqlInsertSyntax = MysqlTableNameSyntax
+  insertStmt = Insert
 
 instance IsSql92UpdateSyntax MysqlSyntax where
   type Sql92UpdateExpressionSyntax MysqlSyntax = MysqlSyntax
@@ -501,11 +512,22 @@ instance IsSql92DeleteSyntax MysqlSyntax where
 
 instance IsSql92Syntax MysqlSyntax where
   type Sql92SelectSyntax MysqlSyntax = MysqlSyntax
-  type Sql92InsertSyntax MysqlSyntax = MysqlSyntax
+  type Sql92InsertSyntax MysqlSyntax = MysqlInsertSyntax
   type Sql92UpdateSyntax MysqlSyntax = MysqlSyntax
   type Sql92DeleteSyntax MysqlSyntax = MysqlSyntax
   selectCmd = id
-  insertCmd = id
+  insertCmd (Insert tblName fields values) =
+    "INSERT INTO " <>
+    intoTableName tblName <>
+    "(" <>
+    (fold . intersperse ", " . fmap (backtickWrap . fromText) $ fields) <>
+    ")" <>
+    go values
+    where
+      go = \case
+        FromExprs exprs -> "VALUES " <> (fold . intersperse ", " . fmap go2 $ exprs)
+        FromSQL sql -> sql
+      go2 exprs = "(" <> (fold . intersperse ", " $ exprs) <> ")"
   updateCmd = id
   deleteCmd = id
 

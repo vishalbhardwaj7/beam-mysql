@@ -8,8 +8,9 @@ import           Data.Foldable (traverse_)
 import           Data.Text (Text, pack)
 import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 Table (..), TableEntity, defaultDbSettings,
-                                insert, insertValues, runInsert)
-import           Database.Beam.MySQL (MySQL, runBeamMySQL)
+                                insert, insertValues)
+import           Database.Beam.MySQL (MySQL, runBeamMySQL,
+                                      runInsertRowReturning)
 import           Database.MySQL.Base (close, connect, execute_)
 import           GHC.Generics (Generic)
 import           TmpMySQL (toConnectInfo, withTempDB)
@@ -25,9 +26,9 @@ main = withTempDB (\db -> do
       _ <- execute_ conn "use test"
       _ <- execute_ conn "create table test_table (name varchar(50) primary key, number_of_pets int unsigned not null);"
       putStrLn ("Running " <> show nQueries <> " queries.")
-      traverse_ (runBeamMySQL conn . insertStatement) [1 .. nQueries]
-    insertStatement n =
-      runInsert . insert (_testTestTable testDb) . insertValues $ [TestT ("Joe" <> (pack . show $ n)) n]
+      traverse_ (runBeamMySQL conn . runInsertRowReturning . intoInsert) [1 .. nQueries]
+    intoInsert i =
+      insert (_testTestTable testDb) . insertValues $ [TestT ("Joe" <> (pack . show $ i)) i]
 
 -- Helpers
 
