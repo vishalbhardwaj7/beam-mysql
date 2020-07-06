@@ -49,12 +49,15 @@ common common-bench
   import:        common-lang
   ghc-options:   -O2 -threaded -with-rtsopts=-N
   build-depends:
+    , beam-core
     , beam-mysql
+    , bytestring
     , directory        ^>=1.3.6.0
     , filepath         ^>=1.4.2.1
     , mysql-haskell
     , random           ^>=1.1
     , safe-exceptions
+    , text
     , typed-process    ^>=0.2.6.0
     , unix             ^>=2.7.2.2
 
@@ -86,25 +89,26 @@ library
 executable raw-insert-bench
   import:         common-bench
   main-is:        Main.hs
-  other-modules:  TmpMySQL
+  other-modules:
+    DBConfig
+    TmpMySQL
+
   hs-source-dirs: bench bench/raw-insert
 
 executable beam-insert-bench
   import:         common-bench
   main-is:        Main.hs
-  other-modules:  TmpMySQL
-  build-depends:
-    , beam-core
-    , text
+  other-modules:
+    DBConfig
+    TmpMySQL
 
   hs-source-dirs: bench bench/beam-insert
 
 executable beam-insert-row-returning-bench
   import:         common-bench
   main-is:        Main.hs
-  other-modules:  TmpMySQL
-  build-depends:
-    , beam-core
-    , text
+  other-modules:
+    DBConfig
+    TmpMySQL
 
   hs-source-dirs: bench bench/beam-insert-row-returning
