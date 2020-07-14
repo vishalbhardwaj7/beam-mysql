@@ -241,10 +241,10 @@ instance HasSqlValueSyntax MysqlSyntax Integer where
   sqlValueSyntax = fromString . show
 
 instance HasSqlValueSyntax MysqlSyntax String where
-  sqlValueSyntax = fromString
+  sqlValueSyntax = quoteWrap . fromString
 
 instance HasSqlValueSyntax MysqlSyntax TL.Text where
-  sqlValueSyntax = MysqlSyntax . fromLazyText
+  sqlValueSyntax = quoteWrap . fromLazyText
 
 -- Syntax defs
 
