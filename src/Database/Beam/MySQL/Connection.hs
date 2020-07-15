@@ -9,7 +9,7 @@ module Database.Beam.MySQL.Connection (
 
 import           Control.Exception.Safe (MonadCatch, MonadMask, MonadThrow,
                                          bracket, throwIO)
-import           Control.Monad (void)
+import           Control.Monad (void, join)
 import           Control.Monad.Except (Except, MonadError, catchError,
                                        runExcept, throwError)
 import           Control.Monad.Free.Church (iterM)
@@ -48,7 +48,7 @@ import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (..),
                                              MysqlSyntax (..),
                                              MysqlTableNameSyntax (..),
                                              intoDebugText, intoQuery,
-                                             intoTableName)
+                                             intoTableName, defaultE, backtickWrap)
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck,
                                       SqlInsert (..), SqlSelect (..),
@@ -263,22 +263,9 @@ runBeamMySQL conn (MySQLM comp) = runReaderT comp (\_ -> pure (), conn)
 runBeamMySQLDebug :: (Text -> IO ()) -> MySQLConn -> MySQLM a -> IO a
 runBeamMySQLDebug dbg conn (MySQLM comp) = runReaderT comp (dbg, conn)
 
--- This works by finding out the primary key, checking what the values affected
--- will be, then doing the insert followed by a lookup on those values.
+-- TODO: combine old and Koz's description
 --
--- It should be fairly fast (primary keys are usually small and databases are
--- designed around primary key comparisons being fast).
---
--- This does not use the last_insert_id method, as it produces very complex
--- code, with questionable benefits (especially given that the function can
--- cause races if used carelessly, as it is shared by connections). Essentially,
--- it won't necessarily be faster (as autoincrements can't be found quickly,
--- while primary keys can), and may even be slower (because we have to consider
--- a larger set of cases, as the autoincrement field may or may not be part of
--- the primary key). Given that we can't avoid a primary key-based lookup in
--- almost any case, the code was simplified with this in mind.
---
--- This can race. Ensure you use it in a transaction!
+-- TODO: hangs on `fail` -- what's going on?
 runInsertRowReturning :: (FromBackendRow MySQL (table Identity)) =>
   SqlInsert MySQL table -> MySQLM (Maybe (table Identity))
 runInsertRowReturning = \case
@@ -297,17 +284,56 @@ runInsertRowReturning = \case
           bracket (acquireStream conn pkStatement)
                   drainStream
                   (liftIO . \(_, stream) -> foldM (go fieldVals) HM.empty stream)
-        -- do the insert
-        let insertStatement = insertCmd ins
-        res <- liftIO . execute_ conn . intoQuery $ insertStatement
-        case okAffectedRows res of
-          0 -> pure Nothing
-          _ -> do
-                -- do a select on that exact match returning 1
-                let queryStatement = SqlSelect . buildPkMatchQuery $ pkColVals
-                runSelectReturningOne queryStatement
+
+        let selectByPrimaryKeyCols pkColVals' = do
+              -- Select inserted rows by Primary Keys
+              -- Result can be totally wrong if some of (vals :: MysqlExpressionSyntax) can result in
+              -- different values when evaluated by db.
+              let queryStatement = SqlSelect . buildPkMatchQuery $ pkColVals'
+              runSelectReturningOne queryStatement
+
+        let insertReturningWithoutAutoincrement = do
+              let insertStatement = insertCmd ins
+              res <- liftIO . execute_ conn . intoQuery $ insertStatement
+              case okAffectedRows res of
+                0 -> pure Nothing
+                _ -> selectByPrimaryKeyCols pkColVals
+
+        let MysqlTableNameSyntax _ nameOfTable = tableName
+        (mautoIncrementCol :: Maybe Text) <- do
+          let queryAI = Query (
+                  "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
+                  "`table_schema`= schema() AND `table_name`='" <> (encodeUtf8 . fromStrict $ nameOfTable) <>
+                  "' AND `extra` LIKE 'auto_increment'"
+                )
+          bracket (acquireStream conn queryAI)
+                  drainStream
+                  (liftIO . \(_, stream) -> do
+                      res <- read stream
+                      case join $ fmap (V.!? 0) res of
+                        Just (MySQLText aiCol) -> pure $ Just aiCol
+                        _ -> pure Nothing)
+
+        case mautoIncrementCol of
+          Nothing -> insertReturningWithoutAutoincrement -- no AI we can use PK to select inserted rows.
+          Just aiCol ->
+            if not $ HM.member aiCol pkColVals
+            then insertReturningWithoutAutoincrement    -- AI exists and not part of PK, so we don't care about it
+            else do                                     -- AI exists and is part of PK
+              let insertStatement = insertCmd ins
+              void $ liftIO . execute_ conn . intoQuery $ insertStatement
+
+              -- hacky. But is there any other way to figure out if AI field is set to some value, or DEFAULT, for example?
+              let newPKs = HM.mapWithKey (\pkF pkV ->
+                                          if pkF == aiCol && (pkV == intoDebugText defaultE)
+                                          then "last_insert_id()"
+                                          else pkV) pkColVals
+              selectByPrimaryKeyCols newPKs
+
       _      -> fail "Cannot insert several rows with runInsertRowReturning"
     where
+      fieldsExpr = fold . intersperse ", " . fmap (backtickWrap . fromText) $ fields
+
       go fieldVals acc v = do
         colName <- extractColName v
         case HM.lookup colName fieldVals of
@@ -322,8 +348,8 @@ runInsertRowReturning = \case
         "WHERE table_schema = schema() " <>
         "AND constraint_name = 'PRIMARY' " <>
         "AND table_name = '" <> (encodeUtf8 . fromStrict $ name) <> "';")
-      buildPkMatchQuery pkColVals =
-        "SELECT * " <>
+      buildPkMatchQuery pkColVals  =
+        "SELECT " <> fieldsExpr <>
         " FROM " <> intoTableName tableName <>
         " WHERE " <> (fold . intersperse " AND " . fmap toPair . HM.toList $ pkColVals) <> ";"
       toPair (colName, val) = MysqlSyntax (fromText colName <> " = " <> fromLazyText val)

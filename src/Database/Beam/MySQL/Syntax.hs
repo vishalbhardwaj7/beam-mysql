@@ -7,7 +7,7 @@ module Database.Beam.MySQL.Syntax
   MysqlTableNameSyntax (..),
   MysqlInsertValuesSyntax (..),
   MysqlInsertSyntax (..),
-  intoQuery, intoDebugText, intoTableName, bracketWrap
+  intoQuery, intoDebugText, intoTableName, bracketWrap, defaultE, backtickWrap
 ) where
 
 import           Data.Aeson (Value)
