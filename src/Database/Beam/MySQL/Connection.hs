@@ -48,7 +48,8 @@ import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (..),
                                              MysqlSyntax (..),
                                              MysqlTableNameSyntax (..),
                                              intoDebugText, intoQuery,
-                                             intoTableName, defaultE, backtickWrap)
+                                             intoTableName, defaultE, backtickWrap,
+                                             intoLazyText)
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck,
                                       SqlInsert (..), SqlSelect (..),
@@ -325,7 +326,7 @@ runInsertRowReturning = \case
 
               -- hacky. But is there any other way to figure out if AI field is set to some value, or DEFAULT, for example?
               let newPKs = HM.mapWithKey (\pkF pkV ->
-                                          if pkF == aiCol && (pkV == intoDebugText defaultE)
+                                          if pkF == aiCol && (pkV == intoLazyText defaultE)
                                           then "last_insert_id()"
                                           else pkV) pkColVals
               selectByPrimaryKeyCols newPKs

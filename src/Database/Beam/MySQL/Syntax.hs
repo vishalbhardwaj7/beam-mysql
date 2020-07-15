@@ -7,7 +7,8 @@ module Database.Beam.MySQL.Syntax
   MysqlTableNameSyntax (..),
   MysqlInsertValuesSyntax (..),
   MysqlInsertSyntax (..),
-  intoQuery, intoDebugText, intoTableName, bracketWrap, defaultE, backtickWrap
+  intoQuery, intoDebugText, intoTableName, bracketWrap,
+  defaultE, backtickWrap, intoLazyText
 ) where
 
 import           Data.Aeson (Value)
@@ -65,6 +66,9 @@ intoQuery (MysqlSyntax b) = Query . TLE.encodeUtf8 . toLazyText $ b
 
 intoDebugText :: MysqlSyntax -> Text
 intoDebugText (MysqlSyntax b) = TL.toStrict . toLazyText $ b
+
+intoLazyText :: MysqlSyntax -> TL.Text
+intoLazyText (MysqlSyntax b) = toLazyText b
 
 quoteWrap :: Builder -> MysqlSyntax
 quoteWrap = wrap "'" "'"
