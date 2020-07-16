@@ -265,8 +265,6 @@ runBeamMySQLDebug :: (Text -> IO ()) -> MySQLConn -> MySQLM a -> IO a
 runBeamMySQLDebug dbg conn (MySQLM comp) = runReaderT comp (dbg, conn)
 
 -- TODO: combine old and Koz's description
---
--- TODO: hangs on `fail` -- what's going on?
 runInsertRowReturning :: (FromBackendRow MySQL (table Identity)) =>
   SqlInsert MySQL table -> MySQLM (Maybe (table Identity))
 runInsertRowReturning = \case
