@@ -224,7 +224,7 @@ newtype MySQLM a = MySQLM (ReaderT (Text -> IO (), MySQLConn) IO a)
                     MonadThrow)
 
 instance MonadFail MySQLM where
-  fail err = fail ("Internal error with: " <> err)
+  fail err = error ("Internal error with: " <> err)
 
 instance MonadBeam MySQL MySQLM where
   runNoReturn sql = do
