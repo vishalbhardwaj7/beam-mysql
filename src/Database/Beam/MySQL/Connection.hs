@@ -9,7 +9,7 @@ module Database.Beam.MySQL.Connection (
 
 import           Control.Exception.Safe (MonadCatch, MonadMask, MonadThrow,
                                          bracket, throwIO)
-import           Control.Monad (void, join)
+import           Control.Monad (void)
 import           Control.Monad.Except (Except, MonadError, catchError,
                                        runExcept, throwError)
 import           Control.Monad.Free.Church (iterM)
@@ -47,9 +47,9 @@ import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (..),
                                              MysqlInsertValuesSyntax (..),
                                              MysqlSyntax (..),
                                              MysqlTableNameSyntax (..),
-                                             intoDebugText, intoQuery,
-                                             intoTableName, defaultE, backtickWrap,
-                                             intoLazyText)
+                                             backtickWrap, defaultE,
+                                             intoDebugText, intoLazyText,
+                                             intoQuery, intoTableName)
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck,
                                       SqlInsert (..), SqlSelect (..),
@@ -309,9 +309,9 @@ runInsertRowReturning = \case
                   drainStream
                   (liftIO . \(_, stream) -> do
                       res <- read stream
-                      case join $ fmap (V.!? 0) res of
+                      case (V.!? 0) =<< res of
                         Just (MySQLText aiCol) -> pure $ Just aiCol
-                        _ -> pure Nothing)
+                        _                      -> pure Nothing)
 
         case mautoIncrementCol of
           Nothing -> insertReturningWithoutAutoincrement -- no AI we can use PK to select inserted rows.
@@ -412,6 +412,19 @@ decodeFromRow fieldTypes values = case runDecode (iterM go churched) fieldTypes 
           Right v  -> advanceColumn >> callback v
       Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
         captured <- captureState
+        -- The 'catch-in-catch' here is needed due to the rather peculiar way
+        -- beam parses NULLable columns. Essentially, it first tries to grab a
+        -- value, then, if it fails, it tries to grab a NULL.
+        --
+        -- This is encoded as an Alt. Therefore, if we don't want strange false
+        -- positives regarding NULL parses, we have to forward the _first_ error
+        -- we saw.
+        --
+        -- Ideally, we'd detect this situation properly, but we are stuck with
+        -- beam's 'BeamRowReadError' type, which doesn't really provision this.
         catchError (callback =<< iterM go opt1)
-                   (\_ -> restoreState captured >> (callback =<< iterM go opt2))
+                   (\err -> do
+                      restoreState captured
+                      catchError (callback =<< iterM go opt2)
+                                 (\_ -> throwError err))
       FailParseWith err -> throwError err
