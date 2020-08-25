@@ -181,9 +181,17 @@ instance (FromField a) => FromField (Maybe a) where
     _         -> Just <$> fromField t v
 
 instance FromField SqlNull where
-  fromField _ = \case
+  fromField t v = case v of
     MySQLNull -> pure SqlNull
-    _         -> Left . ColumnErrorInternal $ "Unexpected non-NULL"
+    _         -> Left errorMsg
+    where
+      errorMsg :: ColumnParseError
+      errorMsg = ColumnTypeMismatch "Present value" "NULL" msg
+      msg :: String
+      msg = "Unexpected actual value of type" <>
+            fieldTypeToString t <>
+            " with value " <>
+            show v
 
 instance FromField ByteString where
   fromField t = \case
