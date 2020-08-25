@@ -203,7 +203,14 @@ instance FromField ByteString where
 instance FromField Text where
   fromField t = \case
     MySQLText v -> pure v
+    MySQLBytes v ->
+      Left . ColumnTypeMismatch "Text" (fieldTypeToString t) . bytesErr $ v
     v            -> throwTypeMismatch "Text" t v
+    where
+      bytesErr :: ByteString -> String
+      bytesErr v = "Tried to read bytes as text: " +|
+                   show v |+
+                   ""
 
 instance FromField LocalTime where
   fromField t = \case
