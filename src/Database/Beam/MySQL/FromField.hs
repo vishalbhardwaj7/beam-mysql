@@ -55,20 +55,23 @@ instance FromField Bool where
     MySQLInt8 v  -> pure (zeroBits /= v)
     MySQLInt8U v -> pure (zeroBits /= v)
     MySQLBit v   -> pure (zeroBits /= v)
-    v             -> throwTypeMismatch "Bool" t v
+    MySQLNull    -> Left ColumnUnexpectedNull
+    v            -> throwTypeMismatch "Bool" t v
 
 instance FromField Int8 where
   fromField t = \case
     MySQLInt8 v    -> pure v
     MySQLDecimal v -> tryPackDecimal "Int8" v
-    v               -> throwTypeMismatch "Int8" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Int8" t v
 
 instance FromField Int16 where
   fromField t = \case
     MySQLInt8 v    -> pure . fromIntegral $ v
     MySQLInt16 v   -> pure v
     MySQLDecimal v -> tryPackDecimal "Int16" v
-    v               -> throwTypeMismatch "Int16" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Int16" t v
 
 instance FromField Int32 where
   fromField t = \case
@@ -76,7 +79,8 @@ instance FromField Int32 where
     MySQLInt16 v   -> pure . fromIntegral $ v
     MySQLInt32 v   -> pure v
     MySQLDecimal v -> tryPackDecimal "Int32" v
-    v               -> throwTypeMismatch "Int32" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Int32" t v
 
 instance FromField Int64 where
   fromField t = \case
@@ -85,32 +89,36 @@ instance FromField Int64 where
     MySQLInt32 v   -> pure . fromIntegral $ v
     MySQLInt64 v   -> pure v
     MySQLDecimal v -> tryPackDecimal "Int64" v
-    v               -> throwTypeMismatch "Int64" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Int64" t v
 
 instance FromField Int where
   fromField t = \case
-    MySQLInt8 v -> pure . fromIntegral $ v
-    MySQLInt16 v -> pure . fromIntegral $ v
-    MySQLInt32 v -> pure . fromIntegral $ v
-    MySQLInt64 v ->
+    MySQLInt8 v    -> pure . fromIntegral $ v
+    MySQLInt16 v   -> pure . fromIntegral $ v
+    MySQLInt32 v   -> pure . fromIntegral $ v
+    MySQLInt64 v   ->
       if finiteBitSize (zeroBits :: Int) == 64
         then pure . fromIntegral $ v
         else throwTypeMismatch "Int" t (MySQLInt64 v)
     MySQLDecimal v -> tryPackDecimal "Int" v
-    v -> throwTypeMismatch "Int" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Int" t v
 
 instance FromField Word8 where
   fromField t = \case
     MySQLInt8U v   -> pure v
     MySQLDecimal v -> tryPackDecimal "Word8" v
-    v               -> throwTypeMismatch "Word8" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Word8" t v
 
 instance FromField Word16 where
   fromField t = \case
     MySQLInt8U v   -> pure . fromIntegral $ v
     MySQLInt16U v  -> pure v
     MySQLDecimal v -> tryPackDecimal "Word16" v
-    v               -> throwTypeMismatch "Word16" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Word16" t v
 
 instance FromField Word32 where
   fromField t = \case
@@ -118,38 +126,43 @@ instance FromField Word32 where
     MySQLInt16U v  -> pure . fromIntegral $ v
     MySQLInt32U v  -> pure v
     MySQLDecimal v -> tryPackDecimal "Word32" v
-    v               -> throwTypeMismatch "Word32" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Word32" t v
 
 instance FromField Word64 where
   fromField t = \case
-    MySQLInt8U v  -> pure . fromIntegral $ v
+    MySQLInt8U v   -> pure . fromIntegral $ v
     MySQLInt16U v  -> pure . fromIntegral $ v
     MySQLInt32U v  -> pure . fromIntegral $ v
     MySQLInt64U v  -> pure v
     MySQLDecimal v -> tryPackDecimal "Word64" v
-    v               -> throwTypeMismatch "Word64" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Word64" t v
 
 instance FromField Word where
   fromField t = \case
-    MySQLInt8U v -> pure . fromIntegral $ v
+    MySQLInt8U v  -> pure . fromIntegral $ v
     MySQLInt16U v -> pure . fromIntegral $ v
     MySQLInt32U v -> pure . fromIntegral $ v
     MySQLInt64U v ->
       if finiteBitSize (zeroBits :: Word) == 64
       then pure . fromIntegral $ v
       else throwTypeMismatch "Word" t (MySQLInt64U v)
-    v -> throwTypeMismatch "Word" t v
+    MySQLNull     -> Left ColumnUnexpectedNull
+    v             -> throwTypeMismatch "Word" t v
 
 instance FromField Float where
   fromField t = \case
     MySQLFloat v -> pure v
-    v             -> throwTypeMismatch "Float" t v
+    MySQLNull    -> Left ColumnUnexpectedNull
+    v            -> throwTypeMismatch "Float" t v
 
 instance FromField Double where
   fromField t = \case
     MySQLFloat v  -> pure . realToFrac $ v
     MySQLDouble v -> pure v
-    v              -> throwTypeMismatch "Double" t v
+    MySQLNull     -> Left ColumnUnexpectedNull
+    v             -> throwTypeMismatch "Double" t v
 
 instance FromField Scientific where
   fromField t = \case
@@ -162,7 +175,8 @@ instance FromField Scientific where
     MySQLInt32U v  -> pure . fromIntegral $ v
     MySQLInt64 v   -> pure . fromIntegral $ v
     MySQLInt64U v  -> pure . fromIntegral $ v
-    v               -> throwTypeMismatch "Scientific" t v
+    MySQLNull      -> Left ColumnUnexpectedNull
+    v              -> throwTypeMismatch "Scientific" t v
 
 instance FromField Rational where
   fromField t = \case
@@ -174,7 +188,8 @@ instance FromField Rational where
     MySQLInt32U v -> pure . fromIntegral $ v
     MySQLInt64 v  -> pure . fromIntegral $ v
     MySQLInt64U v -> pure . fromIntegral $ v
-    v              -> throwTypeMismatch "Rational" t v
+    MySQLNull     -> Left ColumnUnexpectedNull
+    v             -> throwTypeMismatch "Rational" t v
 
 instance (FromField a) => FromField (Maybe a) where
   fromField t v = case v of
@@ -198,13 +213,15 @@ instance FromField ByteString where
   fromField t = \case
     MySQLText v  -> pure . encodeUtf8 $ v
     MySQLBytes v -> pure v
-    v             -> throwTypeMismatch "ByteString" t v
+    MySQLNull    -> Left ColumnUnexpectedNull
+    v            -> throwTypeMismatch "ByteString" t v
 
 instance FromField Text where
   fromField t = \case
-    MySQLText v -> pure v
+    MySQLText v  -> pure v
     MySQLBytes v ->
       Left . ColumnTypeMismatch "Text" (fieldTypeToString t) . bytesErr $ v
+    MySQLNull    -> Left ColumnUnexpectedNull
     v            -> throwTypeMismatch "Text" t v
     where
       bytesErr :: ByteString -> String
@@ -217,12 +234,14 @@ instance FromField LocalTime where
     MySQLDateTime v  -> pure v
     MySQLTimeStamp v -> pure v
     MySQLDate v      -> pure (LocalTime v midnight)
-    v                 -> throwTypeMismatch "LocalTime" t v
+    MySQLNull        -> Left ColumnUnexpectedNull
+    v                -> throwTypeMismatch "LocalTime" t v
 
 instance FromField Day where
   fromField t = \case
     MySQLDate v -> pure v
-    v            -> throwTypeMismatch "Day" t v
+    MySQLNull   -> Left ColumnUnexpectedNull
+    v           -> throwTypeMismatch "Day" t v
 
 instance FromField TimeOfDay where
   fromField t = \case
@@ -230,7 +249,8 @@ instance FromField TimeOfDay where
       if s == zeroBits
         then pure v
         else throwTypeMismatch "TimeOfDay" t (MySQLTime s v)
-    v -> throwTypeMismatch "TimeOfDay" t v
+    MySQLNull     -> Left ColumnUnexpectedNull
+    v             -> throwTypeMismatch "TimeOfDay" t v
 
 instance FromField NominalDiffTime where
   fromField t = \case
@@ -240,7 +260,8 @@ instance FromField NominalDiffTime where
       if isPositive
         then pure ndt
         else pure . negate $ ndt
-    v -> throwTypeMismatch "NominalDiffTime" t v
+    MySQLNull     -> Left ColumnUnexpectedNull
+    v             -> throwTypeMismatch "NominalDiffTime" t v
 
 instance FromField Value where
   fromField t = \case
@@ -250,7 +271,8 @@ instance FromField Value where
     MySQLBytes v -> case eitherDecodeStrict' v of
       Left err  -> Left . ColumnErrorInternal $ "JSON parsing failed: " <> err
       Right val -> pure val
-    v             -> throwTypeMismatch "Aeson.Value" t v
+    MySQLNull    -> Left ColumnUnexpectedNull
+    v            -> throwTypeMismatch "Aeson.Value" t v
 
 -- Helpers
 
