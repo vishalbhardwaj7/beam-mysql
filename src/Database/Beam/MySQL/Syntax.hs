@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE TypeFamilies        #-}
 
 module Database.Beam.MySQL.Syntax
@@ -8,7 +9,7 @@ module Database.Beam.MySQL.Syntax
   MysqlInsertValuesSyntax (..),
   MysqlInsertSyntax (..),
   intoQuery, intoDebugText, intoTableName, bracketWrap,
-  defaultE, backtickWrap, intoLazyText
+  defaultE, backtickWrap, intoLazyText, textSyntax
 ) where
 
 import           Data.Aeson (Value)
@@ -16,6 +17,8 @@ import           Data.Aeson.Text (encodeToTextBuilder)
 import           Data.ByteString (ByteString)
 import           Data.Fixed (E12, Fixed, showFixed)
 import           Data.Foldable (fold)
+import           Data.HashSet (HashSet)
+import qualified Data.HashSet as HS
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.List (intersperse)
 import           Data.Scientific (Scientific)
@@ -56,67 +59,48 @@ import           Database.Beam.Backend.SQL (HasSqlValueSyntax (..), IsSql92Aggre
                                             IsSql99ConcatExpressionSyntax (..),
                                             SqlNull (..))
 import           Database.MySQL.Base (Query (..))
+import           Fmt (build, unlinesF, whenF, (+|), (|+))
 
 -- General syntax type
-newtype MysqlSyntax = MysqlSyntax Builder
-  deriving newtype (Semigroup, Monoid, Eq, IsString)
+newtype MysqlSyntax = MysqlSyntax (HashSet Text, Builder)
+  deriving newtype (Semigroup, Monoid, Eq)
+
+instance IsString MysqlSyntax where
+ fromString = MysqlSyntax . (HS.empty,) . fromString
 
 intoQuery :: MysqlSyntax -> Query
-intoQuery (MysqlSyntax b) = Query . TLE.encodeUtf8 . toLazyText $ b
+intoQuery (MysqlSyntax (_, b)) = Query . TLE.encodeUtf8 . toLazyText $ b
 
 intoDebugText :: MysqlSyntax -> Text
-intoDebugText (MysqlSyntax b) = TL.toStrict . toLazyText $ b
+intoDebugText (MysqlSyntax (tables, b)) =
+  "Query: " +|
+  toLazyText b |+
+  ", relevant table(s):" +|
+  unlinesF tables |+
+  ""
 
 intoLazyText :: MysqlSyntax -> TL.Text
-intoLazyText (MysqlSyntax b) = toLazyText b
-
-quoteWrap :: Builder -> MysqlSyntax
-quoteWrap = wrap "'" "'"
-
-backtickWrap :: Builder -> MysqlSyntax
-backtickWrap = wrap "`" "`"
-
-bracketWrap :: Builder -> MysqlSyntax
-bracketWrap = wrap "(" ")"
-
-wrap :: Builder -> Builder -> Builder -> MysqlSyntax
-wrap lDelim rDelim b = MysqlSyntax (lDelim <> b <> rDelim)
+intoLazyText (MysqlSyntax (_, b)) = toLazyText b
 
 charLen :: Maybe Word -> MysqlSyntax
-charLen = bracketWrap . maybe "MAX" (fromString . show)
+charLen =
+  MysqlSyntax . (HS.empty,) . maybe "MAX" (fromString . show)
 
 charSet :: Maybe Text -> MysqlSyntax
-charSet = foldMap ((" CHARACTER SET " <>) . backtickWrap . fromText)
+charSet = MysqlSyntax . (HS.empty,) . foldMap go
+  where
+    go :: Text -> Builder
+    go = (" CHARACTER SET " <>) . backtickWrap . fromText
 
 numPrec :: Maybe (Word, Maybe Word) -> MysqlSyntax
 numPrec = \case
   Nothing -> mempty
-  Just (d, Nothing) -> bracketWrap . fromString . show $ d
-  Just (d, Just n) -> bracketWrap ((fromString . show $ d) <> ", " <> (fromString . show $ n))
+  Just (d, mn) -> MysqlSyntax . (HS.empty,) . bracketWrap $ case mn of
+    Nothing -> fromString . show $ d
+    Just n  -> (fromString . show $ d) <> ", " <> (fromString . show $ n)
 
-unaryOp :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax
-unaryOp op (MysqlSyntax arg) = op <> bracketWrap arg <> " "
-
-unaryAggregation :: MysqlSyntax -> Maybe MysqlSyntax -> MysqlSyntax -> MysqlSyntax
-unaryAggregation fn q (MysqlSyntax e) = fn <> bracketWrap (go <> e)
-  where MysqlSyntax go = foldMap (<> " ") q
-
-binOp :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax -> MysqlSyntax
-binOp op (MysqlSyntax l) (MysqlSyntax r) =
-  bracketWrap l <> " " <> op <> " " <> bracketWrap r
-
-compOp :: MysqlSyntax -> Maybe MysqlSyntax -> MysqlSyntax -> MysqlSyntax -> MysqlSyntax
-compOp op quantifier (MysqlSyntax l) (MysqlSyntax r) =
-  bracketWrap l <> " " <> op <> fold quantifier <> " " <> bracketWrap r
-
-postfix :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax
-postfix op (MysqlSyntax e) = bracketWrap e <> " " <> op
-
-joinOp :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax -> Maybe MysqlSyntax -> MysqlSyntax
-joinOp joinType l r mOn = l <> " " <> joinType <> " " <> r <> fold mOn
-
-tableOp :: MysqlSyntax -> MysqlSyntax -> MysqlSyntax -> MysqlSyntax
-tableOp op l r = l <> " " <> op <> " " <> r
+textSyntax :: Text -> MysqlSyntax
+textSyntax = MysqlSyntax . (HS.empty,) . fromText
 
 -- Combination of data type name and its casting
 data MysqlDataTypeSyntax = MysqlDataTypeSyntax {
@@ -133,7 +117,10 @@ data MysqlTableNameSyntax = MysqlTableNameSyntax
 
 intoTableName :: MysqlTableNameSyntax -> MysqlSyntax
 intoTableName (MysqlTableNameSyntax db name) =
-  MysqlSyntax (foldMap (\t -> fromText t <> ".") db <> fromText name)
+  MysqlSyntax . (HS.singleton name,) $ foldMap go db <> fromText name
+  where
+    go :: Text -> Builder
+    go t = fromText t <> "."
 
 -- Insert values syntax to support runInsertRowReturning
 data MysqlInsertValuesSyntax =
@@ -142,7 +129,8 @@ data MysqlInsertValuesSyntax =
   deriving stock (Eq)
 
 -- Insert syntax to support runInsertRowReturning
-data MysqlInsertSyntax = Insert MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
+data MysqlInsertSyntax =
+  Insert MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
   deriving stock (Eq)
 
 -- How we convert everything types defined in FromField to MySQL syntax
@@ -189,55 +177,68 @@ instance HasSqlValueSyntax MysqlSyntax Double where
   sqlValueSyntax = fromString . show
 
 instance HasSqlValueSyntax MysqlSyntax Scientific where
-  sqlValueSyntax = MysqlSyntax . scientificBuilder
+  sqlValueSyntax = MysqlSyntax . (HS.empty,) . scientificBuilder
 
 -- Rational is exempted, because there's no good way to do this really
 
-instance (HasSqlValueSyntax MysqlSyntax a) => HasSqlValueSyntax MysqlSyntax (Maybe a) where
+instance (HasSqlValueSyntax MysqlSyntax a) =>
+  HasSqlValueSyntax MysqlSyntax (Maybe a) where
   sqlValueSyntax = maybe (sqlValueSyntax SqlNull) sqlValueSyntax
 
 instance HasSqlValueSyntax MysqlSyntax SqlNull where
   sqlValueSyntax = const "NULL"
 
 instance HasSqlValueSyntax MysqlSyntax ByteString where
-  sqlValueSyntax = quoteWrap . fromText . decodeUtf8
+  sqlValueSyntax = quoteWrap . textSyntax . decodeUtf8
 
 instance HasSqlValueSyntax MysqlSyntax Text where
-  sqlValueSyntax = quoteWrap . fromText
+  sqlValueSyntax = quoteWrap . textSyntax
 
 instance HasSqlValueSyntax MysqlSyntax Day where
-  sqlValueSyntax = quoteWrap . fromString . formatShow iso8601Format
+  sqlValueSyntax =
+    MysqlSyntax . (HS.empty,) . quoteWrap . fromString . formatShow iso8601Format
 
 instance HasSqlValueSyntax MysqlSyntax TimeOfDay where
-  sqlValueSyntax = quoteWrap . fromString . formatShow iso8601Format
+  sqlValueSyntax =
+    MysqlSyntax . (HS.empty,) . quoteWrap . fromString . formatShow iso8601Format
 
 instance HasSqlValueSyntax MysqlSyntax LocalTime where
-  sqlValueSyntax lt = quoteWrap (day <> " " <> tod)
+  sqlValueSyntax lt =
+    MysqlSyntax . (HS.empty,) . quoteWrap $ (day <> " " <> tod)
     where
       day = fromString . formatShow iso8601Format . localDay $ lt
       tod = fromString . formatShow iso8601Format . localTimeOfDay $ lt
 
 instance HasSqlValueSyntax MysqlSyntax NominalDiffTime where
-  sqlValueSyntax d =
-    let dWhole :: Int = abs . floor $ d
-        hours :: Int = dWhole `div` 3600
-        d' = dWhole - (hours * 3600)
-        minutes = d' `div` 60
-        seconds = abs d - fromIntegral ((hours * 3600) + (minutes * 60))
-        secondsFixed :: Fixed E12 = fromRational . toRational $ seconds
-      in
-        MysqlSyntax ((if d < 0 then "-" else mempty) <>
-                     (if hours < 10 then "0" else mempty) <>
-                     (fromString . show $ hours) <>
-                     ":" <>
-                     (if minutes < 10 then "0" else mempty) <>
-                     (fromString . show $ minutes) <>
-                     ":" <>
-                     (if secondsFixed < 10 then "0" else mempty) <>
-                     (fromString . showFixed False $ secondsFixed))
+  sqlValueSyntax d = textSyntax time
+    where
+      dWhole :: Int
+      dWhole = abs . floor $ d
+      hours :: Int
+      hours = dWhole `div` 3600
+      d' :: Int
+      d' = dWhole - (hours * 3600)
+      minutes :: Int
+      minutes = d' `div` 60
+      seconds :: NominalDiffTime
+      seconds = abs d - fromIntegral ((hours * 3600) + (minutes * 60))
+      secondsFixed :: Fixed E12
+      secondsFixed = fromRational . toRational $ seconds
+      time :: Text
+      time = whenF (d < 0) (build @Text "-") +|
+              whenF (hours < 10) (build @Text "0") +|
+              hours |+
+              ":" +|
+              whenF (minutes < 10) (build @Text "0") +|
+              minutes |+
+              ":" +|
+              whenF (secondsFixed < 10) (build @Text "0") +|
+              showFixed False secondsFixed |+
+              ""
 
 instance HasSqlValueSyntax MysqlSyntax Value where
-  sqlValueSyntax = quoteWrap . encodeToTextBuilder
+  sqlValueSyntax =
+    MysqlSyntax . (HS.empty,) . quoteWrap . encodeToTextBuilder
 
 -- Extra convenience instances
 
@@ -245,17 +246,19 @@ instance HasSqlValueSyntax MysqlSyntax Integer where
   sqlValueSyntax = fromString . show
 
 instance HasSqlValueSyntax MysqlSyntax String where
-  sqlValueSyntax = quoteWrap . fromString
+  sqlValueSyntax =
+    MysqlSyntax . (HS.empty,) . quoteWrap . fromString
 
 instance HasSqlValueSyntax MysqlSyntax TL.Text where
-  sqlValueSyntax = quoteWrap . fromLazyText
+  sqlValueSyntax =
+    MysqlSyntax . (HS.empty,) . quoteWrap . fromLazyText
 
 -- Syntax defs
 
 instance IsSql92FieldNameSyntax MysqlSyntax where
-  unqualifiedField = backtickWrap . fromText
+  unqualifiedField = backtickWrap . textSyntax
   qualifiedField qual f =
-    (backtickWrap . fromText $ qual) <>
+    (backtickWrap . textSyntax $ qual) <>
     "." <>
     unqualifiedField f
 
@@ -266,7 +269,7 @@ instance IsSql92QuantifierSyntax MysqlSyntax where
 instance IsSql92DataTypeSyntax MysqlDataTypeSyntax where
   domainType t = MysqlDataTypeSyntax go go
     where
-      go = backtickWrap . fromText $ t
+      go = backtickWrap . textSyntax $ t
   charType mlen mcs = MysqlDataTypeSyntax def "CHAR"
     where
       def = "CHAR" <> charLen mlen <> charSet mcs
@@ -285,7 +288,8 @@ instance IsSql92DataTypeSyntax MysqlDataTypeSyntax where
   varBitType mlen = MysqlDataTypeSyntax def "BINARY"
     where
       def = "VARBINARY" <> charLen mlen
-  numericType mprec = MysqlDataTypeSyntax ("NUMERIC" <> prec) ("DECIMAL" <> prec)
+  numericType mprec =
+    MysqlDataTypeSyntax ("NUMERIC" <> prec) ("DECIMAL" <> prec)
     where
       prec = numPrec mprec
   decimalType mprec = MysqlDataTypeSyntax go go
@@ -295,7 +299,8 @@ instance IsSql92DataTypeSyntax MysqlDataTypeSyntax where
   smallIntType = MysqlDataTypeSyntax "SMALL INT" "INTEGER"
   floatType mprec = MysqlDataTypeSyntax def "DECIMAL"
     where
-      def = "FLOAT" <> foldMap (bracketWrap . fromString . show) mprec
+      def = MysqlSyntax . (HS.empty,) $
+        "FLOAT" <> foldMap (bracketWrap . fromString . show) mprec
   doubleType = MysqlDataTypeSyntax "DOUBLE" "DECIMAL"
   realType = MysqlDataTypeSyntax "REAL" "DECIMAL"
   dateType = MysqlDataTypeSyntax "DATE" "DATE"
@@ -334,8 +339,8 @@ instance IsSql92ExpressionSyntax MysqlSyntax where
   geE = compOp ">="
   negateE = unaryOp "-"
   notE = unaryOp "NOT"
-  existsE (MysqlSyntax e) = "EXISTS" <> bracketWrap e
-  uniqueE (MysqlSyntax e) = "UNIQUE" <> bracketWrap e
+  existsE = funcall "EXISTS"
+  uniqueE = funcall "UNIQUE"
   isNotNullE = postfix "IS NOT NULL"
   isNullE = postfix "IS NULL"
   isTrueE = postfix "IS TRUE"
@@ -344,46 +349,40 @@ instance IsSql92ExpressionSyntax MysqlSyntax where
   isNotFalseE = postfix "IS NOT FALSE"
   isUnknownE = postfix "IS UNKNOWN"
   isNotUnknownE = postfix "IS NOT UNKNOWN"
-  betweenE (MysqlSyntax arg) (MysqlSyntax lo) (MysqlSyntax hi) =
-    bracketWrap arg <> " BETWEEN " <> bracketWrap lo <> " AND " <> bracketWrap hi
+  betweenE arg lo hi = bracketWrap arg <>
+                        " BETWEEN " <>
+                        bracketWrap lo <>
+                        " AND " <>
+                        bracketWrap hi
   valueE = id
-  rowE vals = bracketWrap go
-    where
-      MysqlSyntax go = fold . intersperse ", " $ vals
+  rowE = bracketWrap . fold . intersperse ", "
   fieldE = id
-  subqueryE (MysqlSyntax e) = bracketWrap e
-  positionE (MysqlSyntax needle) (MysqlSyntax haystack) =
-    "POSITION" <> bracketWrap (needle' <> " IN " <> haystack')
-    where
-      MysqlSyntax needle' = bracketWrap needle
-      MysqlSyntax haystack' = bracketWrap haystack
-  nullIfE (MysqlSyntax l) (MysqlSyntax r) = "NULLIF" <> bracketWrap (l <> ", " <> r)
-  absE (MysqlSyntax x) = "ABS" <> bracketWrap x
-  bitLengthE (MysqlSyntax x) = "BIT_LENGTH" <> bracketWrap x
-  charLengthE (MysqlSyntax x) = "CHAR_LENGTH" <> bracketWrap x
-  octetLengthE (MysqlSyntax x) = "OCTET_LENGTH" <> bracketWrap x
-  coalesceE es = "COALESCE" <> bracketWrap go
-    where
-      MysqlSyntax go = fold . intersperse ", " $ es
-  extractE (MysqlSyntax field) (MysqlSyntax from) =
-    "EXTRACT" <> bracketWrap (field <> " FROM " <> go)
-    where MysqlSyntax go = bracketWrap from
-  castE (MysqlSyntax e) to =
-    "CAST" <> bracketWrap (go <> " AS " <> castTarget)
-    where
-      MysqlSyntax go = bracketWrap e
-      MysqlSyntax castTarget = mysqlTypeCast to
+  subqueryE = bracketWrap
+  positionE needle haystack =
+    "POSITION" <> bracketWrap (bracketWrap needle <> " IN " <> bracketWrap haystack)
+  nullIfE l r = "NULLIF" <> bracketWrap (l <> ", " <> r)
+  absE = funcall "ABS"
+  bitLengthE = funcall "BIT_LENGTH"
+  charLengthE = funcall "CHAR_LENGTH"
+  octetLengthE = funcall "OCTET_LENGTH"
+  coalesceE = ("COALESCE" <>) . bracketWrap . fold . intersperse ", "
+  extractE field from =
+    "EXTRACT" <> bracketWrap (field <> " FROM " <> bracketWrap from)
+  castE e to =
+    "CAST" <>
+      bracketWrap (bracketWrap e <> " AS " <> mysqlTypeCast to)
   caseE cases def =
     "CASE " <> foldMap go cases <> "ELSE " <> def <> " END"
     where go (cond, res) = "WHEN " <> cond <> " THEN " <> res <> " "
   currentTimestampE = "CURRENT_TIMESTAMP"
   defaultE = "DEFAULT"
-  inE (MysqlSyntax e) es =
+  inE e es =
     bracketWrap e <> " IN " <> bracketWrap go
-    where (MysqlSyntax go) = fold . intersperse ", " $ es
-  trimE (MysqlSyntax x) = "TRIM" <> bracketWrap x
-  lowerE (MysqlSyntax x) = "LOWER" <> bracketWrap x
-  upperE (MysqlSyntax x) = "UPPER" <> bracketWrap x
+    where
+      go = fold . intersperse ", " $ es
+  trimE = funcall "TRIM"
+  lowerE = funcall "LOWER"
+  upperE = funcall "UPPER"
 
 instance IsSql92AggregationSetQuantifierSyntax MysqlSyntax where
   setQuantifierDistinct = "DISTINCT"
@@ -400,10 +399,12 @@ instance IsSql92AggregationExpressionSyntax MysqlSyntax where
 
 instance IsSql92ProjectionSyntax MysqlSyntax where
   type Sql92ProjectionExpressionSyntax MysqlSyntax = MysqlSyntax
-  projExprs exprs = fold . intersperse ", " . fmap go $ exprs
+  projExprs = fold . intersperse ", " . fmap go
     where
-      go (expr, name) =
-        expr <> foldMap (\name' -> " AS " <> (backtickWrap . fromText $ name')) name
+      go :: (MysqlSyntax, Maybe Text) -> MysqlSyntax
+      go (expr, name) = expr <> foldMap go2 name
+      go2 :: Text -> MysqlSyntax
+      go2 = (" AS " <>) . backtickWrap . textSyntax
 
 instance IsSql92TableNameSyntax MysqlTableNameSyntax where
   tableName = MysqlTableNameSyntax
@@ -413,22 +414,27 @@ instance IsSql92TableSourceSyntax MysqlSyntax where
   type Sql92TableSourceSelectSyntax MysqlSyntax = MysqlSyntax
   type Sql92TableSourceExpressionSyntax MysqlSyntax = MysqlSyntax
   tableNamed = intoTableName
-  tableFromSubSelect (MysqlSyntax s) = bracketWrap s
+  tableFromSubSelect = bracketWrap
   tableFromValues =
     bracketWrap . fold . intersperse " UNION " . fmap (\vals -> "SELECT " <> go vals)
-    where go = fold . intersperse ", " . fmap (\(MysqlSyntax e) -> "(" <> e <> ")")
+    where
+      go :: [MysqlSyntax] -> MysqlSyntax
+      go = fold . intersperse ", " . fmap bracketWrap
 
 instance IsSql92FromSyntax MysqlSyntax where
   type Sql92FromTableSourceSyntax MysqlSyntax = MysqlSyntax
   type Sql92FromExpressionSyntax MysqlSyntax = MysqlSyntax
   fromTable tableE = \case
     Nothing -> tableE
-    Just (name, cols) ->
+    Just (name, mCols) ->
       tableE <>
       " AS " <>
-      (backtickWrap . fromText $ name) <>
-      foldMap (go . fold . intersperse ", " . fmap (backtickWrap . fromText)) cols
-    where go (MysqlSyntax e) = bracketWrap e
+      (backtickWrap . textSyntax $ name) <>
+      foldMap go mCols
+    where
+      go :: [Text] -> MysqlSyntax
+      go =
+        bracketWrap . fold . intersperse ", " . fmap (backtickWrap . textSyntax)
   innerJoin = joinOp "JOIN"
   leftJoin = joinOp "LEFT JOIN"
   rightJoin = joinOp "RIGHT JOIN"
@@ -523,15 +529,17 @@ instance IsSql92Syntax MysqlSyntax where
   insertCmd (Insert tblName fields values) =
     "INSERT INTO " <>
     intoTableName tblName <>
-    "(" <>
-    (fold . intersperse ", " . fmap (backtickWrap . fromText) $ fields) <>
-    ")" <>
+    (bracketWrap . fold . intersperse ", " . fmap textSyntax $ fields) <>
     go values
     where
+      go :: MysqlInsertValuesSyntax -> MysqlSyntax
       go = \case
-        FromExprs exprs -> "VALUES " <> (fold . intersperse ", " . fmap go2 $ exprs)
+        FromExprs exprs ->
+          "VALUES " <>
+          (fold . intersperse ", " . fmap go2 $ exprs)
         FromSQL sql -> sql
-      go2 exprs = "(" <> (fold . intersperse ", " $ exprs) <> ")"
+      go2 :: [MysqlSyntax] -> MysqlSyntax
+      go2 = bracketWrap . fold . intersperse ", "
   updateCmd = id
   deleteCmd = id
 
@@ -539,3 +547,45 @@ instance IsSql99ConcatExpressionSyntax MysqlSyntax where
   concatE = \case
     [] -> mempty
     xs -> "CONCAT(" <> (fold . intersperse ", " $ xs) <> ")"
+
+-- Helpers
+
+quoteWrap :: (IsString s, Semigroup s) => s -> s
+quoteWrap = wrap "'" "'"
+
+backtickWrap :: (IsString s, Semigroup s) => s -> s
+backtickWrap = wrap "`" "`"
+
+bracketWrap :: (IsString s, Semigroup s) => s -> s
+bracketWrap = wrap "(" ")"
+
+wrap :: (Semigroup s) => s -> s -> s -> s
+wrap lDelim rDelim x = lDelim <> x <> rDelim
+
+binOp :: (Semigroup s, IsString s) => s -> s -> s -> s
+binOp op lOp rOp = bracketWrap lOp <> " " <> op <> " " <> bracketWrap rOp
+
+compOp :: (IsString s, Foldable t, Monoid s) => s -> t s -> s -> s -> s
+compOp op quantifier lOp rOp =
+  bracketWrap lOp <> " " <> op <> fold quantifier <> " " <> bracketWrap rOp
+
+unaryOp :: (Semigroup s, IsString s) => s -> s -> s
+unaryOp op arg = op <> bracketWrap arg <> " "
+
+postfix :: (Semigroup s, IsString s) => s -> s -> s
+postfix op arg = bracketWrap arg <> " " <> op
+
+funcall :: (Semigroup s, IsString s) => s -> s -> s
+funcall fn arg = fn <> bracketWrap arg
+
+unaryAggregation :: (IsString s, Foldable t, Monoid s) => s -> t s -> s -> s
+unaryAggregation fn q e = fn <> bracketWrap (foldMap (<> " ") q <> e)
+
+joinOp :: (IsString s, Foldable t, Monoid s) =>
+  s -> s -> s -> t s -> s
+joinOp joinType l r mOn = l <> " " <> joinType <> " " <> r <> fold mOn
+
+tableOp :: (Semigroup s, IsString s) => s -> s -> s -> s
+tableOp op l r = l <> " " <> op <> " " <> r
+
+
