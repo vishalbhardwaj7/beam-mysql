@@ -2,13 +2,15 @@
 {-# LANGUAGE TypeFamilies        #-}
 
 module Database.Beam.MySQL.Connection (
-  MySQL(..),
-  MySQLM(..),
+  MySQL (..),
+  MySQLM (..),
+  ColumnDecodeError (..),
   runBeamMySQL, runBeamMySQLDebug, runInsertRowReturning
   ) where
 
-import           Control.Exception.Safe (MonadCatch, MonadMask, MonadThrow,
-                                         bracket, throwIO)
+import           Control.Exception.Safe (Exception, MonadCatch, MonadMask,
+                                         MonadThrow, bracket, catch, handle,
+                                         throw, throwIO)
 import           Control.Monad (void)
 import           Control.Monad.Except (Except, MonadError, catchError,
                                        runExcept, throwError)
@@ -24,12 +26,14 @@ import           Data.ByteString (ByteString)
 import           Data.Foldable (fold)
 import           Data.Functor.Identity (Identity)
 import           Data.HashMap.Strict as HM
+import           Data.HashSet (HashSet)
+import qualified Data.HashSet as HS
 import           Data.Int (Int16, Int32, Int64, Int8)
+import           Data.Kind (Type)
 import           Data.List (intersperse)
 import           Data.Scientific (Scientific)
 import           Data.Text (Text)
 import           Data.Text.Lazy (fromStrict)
-import           Data.Text.Lazy.Builder (fromLazyText, fromText, toLazyText)
 import           Data.Text.Lazy.Encoding (encodeUtf8)
 import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
 import           Data.Vector (Vector)
@@ -48,8 +52,8 @@ import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (..),
                                              MysqlSyntax (..),
                                              MysqlTableNameSyntax (..),
                                              backtickWrap, defaultE,
-                                             intoDebugText, intoLazyText,
-                                             intoQuery, intoTableName)
+                                             intoDebugText, intoQuery,
+                                             intoTableName, textSyntax)
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck,
                                       SqlInsert (..), SqlSelect (..),
@@ -213,6 +217,15 @@ instance HasSqlEqualityCheck MySQL Value
 
 instance HasSqlQuantifiedEqualityCheck MySQL Value
 
+-- A more useful error context for beam decoding errors
+data ColumnDecodeError = ColumnDecodeError {
+  tableNames :: !(HashSet Text),
+  errorType  :: {-# UNPACK #-} !BeamRowReadError
+  }
+  deriving stock (Eq, Show)
+
+instance Exception ColumnDecodeError
+
 -- Our 'operational monad'
 newtype MySQLM a = MySQLM (ReaderT (Text -> IO (), MySQLConn) IO a)
   deriving newtype (Functor,
@@ -227,14 +240,15 @@ instance MonadFail MySQLM where
   fail err = error ("Internal error with: " <> err)
 
 instance MonadBeam MySQL MySQLM where
-  runNoReturn sql = do
+  runNoReturn sql@(MysqlSyntax (tables, _)) = do
     (statement, conn) <- processAndLog sql
-    void . liftIO. execute_ conn $ statement
-  runReturningOne sql = do
+    catch (void . liftIO. execute_ conn $ statement)
+          (rethrowBeamRowError tables)
+  runReturningOne sql@(MysqlSyntax (tables, _)) = do
     (statement, conn) <- processAndLog sql
     bracket (acquireStream conn statement)
             drainStream
-            (liftIO . processOneResult)
+            (handle (rethrowBeamRowError tables) . liftIO . processOneResult)
     where
       processOneResult (fts, stream) = do
         mRes <- read stream
@@ -245,16 +259,22 @@ instance MonadBeam MySQL MySQLM where
             case don'tCare of
               Nothing -> Just <$> decodeFromRow fts res
               Just _  -> pure Nothing
-  runReturningList sql = do
+  runReturningList sql@(MysqlSyntax (tables, _)) = do
     (statement, conn) <- processAndLog sql
     bracket (acquireStream conn statement)
             drainStream
-            (\(fts, stream) -> liftIO (S.toList =<< mapM (decodeFromRow fts) stream))
-  runReturningMany sql callback = do
+            (\(fts, stream) ->
+              handle (rethrowBeamRowError tables) .
+                      liftIO $
+                      (S.toList =<< mapM (decodeFromRow fts) stream))
+  runReturningMany sql@(MysqlSyntax (tables, _)) callback = do
     (statement, conn) <- processAndLog sql
     bracket (acquireStream conn statement)
             drainStream
-            (\(fts, stream) -> callback (liftIO (read =<< mapM (decodeFromRow fts) stream)))
+            (\(fts, stream) ->
+              handle (rethrowBeamRowError tables) .
+                callback $
+                liftIO (read =<< mapM (decodeFromRow fts) stream))
 
 -- Run without debugging
 runBeamMySQL :: MySQLConn -> MySQLM a -> IO a
@@ -264,94 +284,124 @@ runBeamMySQL conn (MySQLM comp) = runReaderT comp (\_ -> pure (), conn)
 runBeamMySQLDebug :: (Text -> IO ()) -> MySQLConn -> MySQLM a -> IO a
 runBeamMySQLDebug dbg conn (MySQLM comp) = runReaderT comp (dbg, conn)
 
--- TODO: combine old and Koz's description
-runInsertRowReturning :: (FromBackendRow MySQL (table Identity)) =>
+runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
+  (FromBackendRow MySQL (table Identity)) =>
   SqlInsert MySQL table -> MySQLM (Maybe (table Identity))
 runInsertRowReturning = \case
   SqlInsertNoRows -> pure Nothing
-  (SqlInsert _ ins@(Insert tableName fields values)) -> case values of
+  SqlInsert _ ins@(Insert tableName fields values) -> case values of
     FromSQL _ -> fail "Not implemented for INSERT INTO ... SELECT ..."
-    FromExprs exprs -> case exprs of
-      []     -> pure Nothing -- should be impossible
-      [expr] -> do
-        let fieldVals =
-              HM.fromList . zipWith (\t (MysqlSyntax b) -> (t, toLazyText b)) fields $ expr
-        -- get primary key and what values would change there
-        let pkStatement = buildPkQuery tableName
-        (_, conn) <- MySQLM ask
-        pkColVals <-
-          bracket (acquireStream conn pkStatement)
-                  drainStream
-                  (liftIO . \(_, stream) -> foldM (go fieldVals) HM.empty stream)
-
-        let selectByPrimaryKeyCols pkColVals' = do
-              -- Select inserted rows by Primary Keys
-              -- Result can be totally wrong if some of (vals :: MysqlExpressionSyntax) can result in
-              -- different values when evaluated by db.
-              let queryStatement = SqlSelect . buildPkMatchQuery $ pkColVals'
-              runSelectReturningOne queryStatement
-
-        let insertReturningWithoutAutoincrement = do
-              let insertStatement = insertCmd ins
-              res <- liftIO . execute_ conn . intoQuery $ insertStatement
-              case okAffectedRows res of
-                0 -> pure Nothing
-                _ -> selectByPrimaryKeyCols pkColVals
-
-        let MysqlTableNameSyntax _ nameOfTable = tableName
-        (mautoIncrementCol :: Maybe Text) <- do
-          let queryAI = Query (
-                  "SELECT `column_name` FROM `information_schema`.`columns` WHERE " <>
-                  "`table_schema`= schema() AND `table_name`='" <> (encodeUtf8 . fromStrict $ nameOfTable) <>
-                  "' AND `extra` LIKE 'auto_increment'"
-                )
-          bracket (acquireStream conn queryAI)
-                  drainStream
-                  (liftIO . \(_, stream) -> do
-                      res <- read stream
-                      case (V.!? 0) =<< res of
-                        Just (MySQLText aiCol) -> pure $ Just aiCol
-                        _                      -> pure Nothing)
-
-        case mautoIncrementCol of
-          Nothing -> insertReturningWithoutAutoincrement -- no AI we can use PK to select inserted rows.
-          Just aiCol ->
-            if not $ HM.member aiCol pkColVals
-            then insertReturningWithoutAutoincrement    -- AI exists and not part of PK, so we don't care about it
-            else do                                     -- AI exists and is part of PK
-              let insertStatement = insertCmd ins
-              void $ liftIO . execute_ conn . intoQuery $ insertStatement
-
-              -- hacky. But is there any other way to figure out if AI field is set to some value, or DEFAULT, for example?
-              let newPKs = HM.mapWithKey (\pkF pkV ->
-                                          if pkF == aiCol && (pkV == intoLazyText defaultE)
-                                          then "last_insert_id()"
-                                          else pkV) pkColVals
-              selectByPrimaryKeyCols newPKs
-
-      _      -> fail "Cannot insert several rows with runInsertRowReturning"
+    FromExprs [] -> pure Nothing -- should be impossible
+    FromExprs [expr] -> handle (rethrowBeamRowError (tblNameSet tableName)) $ do
+      let fieldVals = HM.fromList . zip fields $ expr
+      -- get primary key and what values would change there
+      let pkStatement = buildPkQuery tableName
+      (_, conn) <- MySQLM ask
+      pkColVals <-
+        bracket (acquireStream conn pkStatement)
+                drainStream
+                (liftIO . \(_, stream) -> foldM (go fieldVals) HM.empty stream)
+      let MysqlTableNameSyntax _ nameOfTable = tableName
+      -- This assumes _one_ auto-increment column. What if there are several?
+      -- TODO: Determine proper semantics for this. - Koz
+      mAutoincCol <- collectAutoIncrementCol conn nameOfTable
+      case mAutoincCol of
+        -- No autoincrementing column(s), so primary key is enough to select
+        -- changed rows.
+        Nothing         -> insertReturningWithoutAutoinc conn pkColVals
+        Just autoincCol -> case HM.lookup autoincCol pkColVals of
+          -- The autoincrementing column isn't part of the primary key, so it
+          -- doesn't matter.
+          Nothing -> insertReturningWithoutAutoinc conn pkColVals
+          Just _  -> do
+            let insertStatement = insertCmd ins
+            void . liftIO . execute_ conn . intoQuery $ insertStatement
+            -- This is a gory hack.
+            -- TODO: Is there a better (or indeed, _any_ other) way to figure
+            -- out if an autoincrementing field is set to some value, or
+            -- DEFAULT, for example?
+            let newPKs = HM.mapWithKey (regraft autoincCol) pkColVals
+            selectByPrimaryKeyCols newPKs
+    _ -> fail "Cannot insert several rows with runInsertRowReturning"
     where
-      fieldsExpr = fold . intersperse ", " . fmap (backtickWrap . fromText) $ fields
-
-      go fieldVals acc v = do
-        colName <- extractColName v
-        case HM.lookup colName fieldVals of
-          Nothing  -> pure acc
-          Just val -> pure (HM.insert colName val acc)
-      extractColName v = case V.head v of
-        MySQLText t -> pure t
-        _           -> fail "Column name was not text"
+      buildPkQuery :: MysqlTableNameSyntax -> Query
       buildPkQuery (MysqlTableNameSyntax _ name) = Query (
         "SELECT key_column_usage.column_name " <>
         "FROM information_schema.key_column_usage " <>
         "WHERE table_schema = schema() " <>
         "AND constraint_name = 'PRIMARY' " <>
-        "AND table_name = '" <> (encodeUtf8 . fromStrict $ name) <> "';")
-      buildPkMatchQuery pkColVals  =
-        "SELECT " <> fieldsExpr <>
-        " FROM " <> intoTableName tableName <>
-        " WHERE " <> (fold . intersperse " AND " . fmap toPair . HM.toList $ pkColVals) <> ";"
-      toPair (colName, val) = MysqlSyntax (fromText colName <> " = " <> fromLazyText val)
+        "AND table_name = '" <>
+        (encodeUtf8 . fromStrict $ name) <>
+        "';")
+      go :: HashMap Text v -> HashMap Text v -> Vector MySQLValue -> IO (HashMap Text v)
+      go fieldVals acc v = do
+        colName <- extractColName v
+        case HM.lookup colName fieldVals of
+          Nothing  -> pure acc
+          Just val -> pure . HM.insert colName val $ acc
+      extractColName :: Vector MySQLValue -> IO Text
+      extractColName v = case V.head v of
+        MySQLText t -> pure t
+        _           -> fail "Column name was not text"
+      -- Select inserted rows by primary keys
+      -- Result can be totally wrong if the values are not constant
+      -- expressions.
+      --
+      -- TODO: Tagging of non-constants to block their evaluation. - Koz
+      selectByPrimaryKeyCols ::
+        HashMap Text MysqlSyntax -> MySQLM (Maybe (table Identity))
+      selectByPrimaryKeyCols pkColVals = do
+        let queryStatement = SqlSelect . buildPkMatchQuery $ pkColVals
+        runSelectReturningOne queryStatement
+      fieldsExpr :: MysqlSyntax
+      fieldsExpr =
+        fold . intersperse ", " . fmap (backtickWrap . textSyntax) $ fields
+      buildPkMatchQuery :: HashMap Text MysqlSyntax -> MysqlSyntax
+      buildPkMatchQuery pkColVals =
+        "SELECT " <>
+        fieldsExpr <>
+        " FROM " <>
+        intoTableName tableName <>
+        " WHERE " <>
+        (fold . intersperse " AND" . fmap fromPair . HM.toList $ pkColVals) <>
+        ";"
+      fromPair :: (Text, MysqlSyntax) -> MysqlSyntax
+      fromPair (colName, val) = textSyntax colName <> " = " <> val
+      collectAutoIncrementCol :: MySQLConn -> Text -> MySQLM (Maybe Text)
+      collectAutoIncrementCol conn nameOfTable = do
+        let autoIncQuery = Query (
+              "SELECT `column_name` " <>
+              "FROM `information_schema`.`columns` " <>
+              "WHERE `table_schema` = schema() " <>
+              "AND `table_name` = '" <>
+              (encodeUtf8 . fromStrict $ nameOfTable) <>
+              "' AND `extra` LIKE 'auto_increment';"
+              )
+        bracket (acquireStream conn autoIncQuery)
+                drainStream
+                (liftIO . \(_, stream) -> do
+                    res <- read stream
+                    case (V.!? 0) =<< res of
+                      Just (MySQLText autoincCol) -> pure . Just $ autoincCol
+                      _                           -> pure Nothing)
+      insertReturningWithoutAutoinc ::
+        MySQLConn ->
+        HashMap Text MysqlSyntax ->
+        MySQLM (Maybe (table Identity))
+      insertReturningWithoutAutoinc conn pkColVals = do
+        let insertStatement = insertCmd ins
+        res <- liftIO . execute_ conn . intoQuery $ insertStatement
+        case okAffectedRows res of
+          0 -> pure Nothing
+          _ -> selectByPrimaryKeyCols pkColVals
+      regraft :: Text -> Text -> MysqlSyntax -> MysqlSyntax
+      regraft autoincCol pkName pkValue =
+        if pkName == autoincCol && pkValue == defaultE
+        then "last_insert_id()"
+        else pkValue
+      tblNameSet :: MysqlTableNameSyntax -> HashSet Text
+      tblNameSet (MysqlTableNameSyntax _ nameOfTable) =
+        HS.singleton nameOfTable
 
 -- Helpers
 
@@ -374,7 +424,9 @@ drainStream (_, stream) = liftIO . skipToEof $ stream
 -- Decoding from a row is complex enough to warrant its own operators and an
 -- explicit stack.
 newtype Decode a =
-  Decode (ReaderT (Vector FieldType) (ReaderT (Vector MySQLValue) (StateT Int (Except BeamRowReadError))) a)
+  Decode (ReaderT (Vector FieldType)
+          (ReaderT (Vector MySQLValue)
+          (StateT Int (Except BeamRowReadError))) a)
   deriving newtype (Functor, Applicative, Monad, MonadError BeamRowReadError)
 
 runDecode :: Decode a -> Vector FieldType -> Vector MySQLValue -> Either BeamRowReadError a
@@ -428,3 +480,8 @@ decodeFromRow fieldTypes values = case runDecode (iterM go churched) fieldTypes 
                       catchError (callback =<< iterM go opt2)
                                  (\_ -> throwError err))
       FailParseWith err -> throwError err
+
+-- This allows us to report errors in row decodes with additional context
+-- (namely, tables involved).
+rethrowBeamRowError :: HashSet Text -> BeamRowReadError -> MySQLM a
+rethrowBeamRowError tables = throw . ColumnDecodeError tables
