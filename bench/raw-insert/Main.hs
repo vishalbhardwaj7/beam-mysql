@@ -3,8 +3,8 @@ module Main (main) where
 import           Control.Exception.Safe (bracket)
 import           Data.Foldable (traverse_)
 import           Database.MySQL.Base (close, connect, execute_)
+import           Database.MySQL.Temp (toConnectInfo, withTempDB)
 import           DBConfig (intoRawInsert, setUpDB)
-import           TmpMySQL (toConnectInfo, withTempDB)
 
 main :: IO ()
 main = withTempDB (\db -> do

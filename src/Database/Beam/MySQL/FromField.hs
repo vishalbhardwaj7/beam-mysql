@@ -191,10 +191,12 @@ instance FromField Rational where
     MySQLNull     -> Left ColumnUnexpectedNull
     v             -> throwTypeMismatch "Rational" t v
 
+{-
 instance (FromField a) => FromField (Maybe a) where
   fromField t v = case v of
     MySQLNull -> pure Nothing
     _         -> Just <$> fromField t v
+-}
 
 instance FromField SqlNull where
   fromField t v = case v of

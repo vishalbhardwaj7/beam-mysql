@@ -4,8 +4,8 @@ import           Control.Exception.Safe (bracket)
 import           Data.Foldable (traverse_)
 import           Database.Beam.MySQL (runBeamMySQL, runInsertRowReturning)
 import           Database.MySQL.Base (close, connect)
+import           Database.MySQL.Temp (toConnectInfo, withTempDB)
 import           DBConfig (intoInsert, setUpDB)
-import           TmpMySQL (toConnectInfo, withTempDB)
 
 main :: IO ()
 main = withTempDB (\db -> do
