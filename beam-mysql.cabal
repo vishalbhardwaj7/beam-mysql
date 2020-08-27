@@ -73,9 +73,13 @@ common common-test
   build-depends:
     , beam-core
     , beam-mysql
-    , hspec       ^>=2.7.1
+    , hspec                 ^>=2.7.1
+    , mysql-temp
+    , unordered-containers
 
   hs-source-dirs: test
+
+-- Libraries
 
 library
   import:          common-lang
@@ -114,27 +118,36 @@ library mysql-temp
 
   hs-source-dirs:  temp-db
 
+-- Tests
+
 test-suite nullable
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  build-depends:
-    , mysql-temp
-    , unordered-containers
-
   hs-source-dirs: test/nullable
 
-executable raw-insert-bench
+test-suite bad-schemata
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/bad-schemata
+
+-- Benchmarks
+
+benchmark raw-insert-bench
   import:         common-bench
+  type:           exitcode-stdio-1.0
   main-is:        Main.hs
   hs-source-dirs: bench/raw-insert
 
-executable beam-insert-bench
+benchmark beam-insert-bench
   import:         common-bench
+  type:           exitcode-stdio-1.0
   main-is:        Main.hs
   hs-source-dirs: bench/beam-insert
 
-executable beam-insert-row-returning-bench
+benchmark beam-insert-row-returning-bench
   import:         common-bench
+  type:           exitcode-stdio-1.0
   main-is:        Main.hs
   hs-source-dirs: bench/beam-insert-row-returning

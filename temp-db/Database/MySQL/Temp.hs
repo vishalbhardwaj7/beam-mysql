@@ -88,7 +88,7 @@ buildInitCommand userName tmpDir = shell $
   userName |+
   " --datadir=" +|
   tmpDir |+
-  " --explicit-defaults-for-timestamp"
+  " --explicit-defaults-for-timestamp --log-error-verbosity=1"
 
 buildRunCommand :: String -> FilePath -> String -> ProcessConfig () () ()
 buildRunCommand userName tmpDir sock = shell $
@@ -98,4 +98,4 @@ buildRunCommand userName tmpDir sock = shell $
   tmpDir |+
   " --socket=" +|
   sock |+
-  ""
+  " --log-error-verbosity=1"

@@ -14,8 +14,7 @@ import           Data.Text (Text)
 import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 SqlSelect, Table (PrimaryKey, primaryKey),
                                 TableEntity, all_, defaultDbSettings,
-                                runSelectReturningList, runSelectReturningOne,
-                                select)
+                                runSelectReturningOne, select)
 import           Database.Beam.Backend.SQL.Row (ColumnParseError (ColumnUnexpectedNull),
                                                 brreColumn, brreError)
 import           Database.Beam.MySQL (ColumnDecodeError (ColumnDecodeError),
@@ -39,7 +38,7 @@ main = do
                               runQueryCatching conn)
     runQueryCatching :: MySQLConn -> IO (Maybe ColumnDecodeError)
     runQueryCatching conn =
-      catch (runDBDumping2 conn >> runDBDumping conn)
+      catch (runDBDumping conn)
             (\cde@ColumnDecodeError{} -> pure . Just $ cde)
     runDBDumping :: MySQLConn -> IO (Maybe a)
     runDBDumping conn = do
@@ -47,11 +46,8 @@ main = do
       case res of
         Nothing  -> pure Nothing
         Just row -> fail ("Got a result when not expecting: " <> show row)
-    runDBDumping2 conn = runBeamMySQL conn . runSelectReturningList $ query2
     query :: SqlSelect MySQL (TestT Identity)
     query = select . all_ . _testTestTable $ testDB
-    query2 :: SqlSelect MySQL (TestNullsT Identity)
-    query2 = select . all_ . _testTestNullsTable $ testDB
 
 -- Helpers
 
@@ -90,27 +86,9 @@ instance Table TestT where
     deriving anyclass (Beamable)
   primaryKey = TestTPK . _testId
 
-data TestNullsT (f :: Type -> Type) = TestNullsT
+newtype TestDB (f :: Type -> Type) = TestDB
   {
-    _testNullsId   :: Columnar f Int64,
-    -- This works, even though we have no FromField (Maybe a) instance!
-    -- Compiler doesn't even complain, and code runs without issue.
-    _testNullsData :: Columnar f (Maybe Text)
-  }
-  deriving stock (Generic)
-  deriving anyclass (Beamable)
-
-instance Table TestNullsT where
-  data PrimaryKey TestNullsT (f :: Type -> Type) =
-    TestNullsTPK (Columnar f Int64)
-    deriving stock (Generic)
-    deriving anyclass (Beamable)
-  primaryKey = TestNullsTPK . _testNullsId
-
-data TestDB (f :: Type -> Type) = TestDB
-  {
-    _testTestTable      :: f (TableEntity TestT),
-    _testTestNullsTable :: f (TableEntity TestNullsT)
+    _testTestTable      :: f (TableEntity TestT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -124,8 +102,6 @@ setUpBadDB conn = do
   void . execute_ conn $ "use test"
   void . execute_ conn $ makeTest
   void . execute_ conn $ insertTest
-  void . execute_ conn $ makeNullsTest
-  void . execute_ conn $ insertNullsTest
   pure ()
   where
     makeTest :: Query
@@ -134,18 +110,7 @@ setUpBadDB conn = do
       "id bigint primary key auto_increment, " <>
       "data varchar(255)" <>
       ");"
-    makeNullsTest :: Query
-    makeNullsTest = Query $
-      "create table test_nulls_table (" <>
-      "nulls_id bigint primary key auto_increment, " <>
-      "nulls_data varchar(255)" <>
-      ");"
     insertTest :: Query
     insertTest = Query $
       "insert into test_table (id, data) " <>
       "values (DEFAULT, NULL);"
-    insertNullsTest :: Query
-    insertNullsTest = Query $
-      "insert into test_nulls_table (nulls_id, nulls_data) " <>
-      "values (DEFAULT, NULL), (DEFAULT, 'foo');"
-
