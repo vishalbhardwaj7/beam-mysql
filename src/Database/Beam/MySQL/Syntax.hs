@@ -117,10 +117,11 @@ data MysqlTableNameSyntax = MysqlTableNameSyntax
 
 intoTableName :: MysqlTableNameSyntax -> MysqlSyntax
 intoTableName (MysqlTableNameSyntax db name) =
-  MysqlSyntax . (HS.singleton name,) $ foldMap go db <> fromText name
+  MysqlSyntax . (HS.singleton name,) $
+    foldMap go db <> (backtickWrap . fromText $ name)
   where
     go :: Text -> Builder
-    go t = fromText t <> "."
+    go t = (backtickWrap . fromText $ t) <> "."
 
 -- Insert values syntax to support runInsertRowReturning
 data MysqlInsertValuesSyntax =
