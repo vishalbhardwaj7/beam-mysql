@@ -23,6 +23,8 @@ source-repository head
   type:     git
   location: https://github.com/juspay/beam-mysql 
 
+-- Common sections
+
 common common-lang
   ghc-options:
     -Wall -Wcompat -Wincomplete-record-updates
@@ -52,23 +54,50 @@ common common-bench
     , beam-core
     , beam-mysql
     , bytestring
-    , directory        ^>=1.3.6.0
-    , filepath         ^>=1.4.2.1
-    , hspec
-    , mysql-haskell
-    , random           ^>=1.1
-    , safe-exceptions
-    , text
-    , typed-process    ^>=0.2.6.0
-    , unix             ^>=2.7.2.2
+    , directory      ^>=1.3.6.0
+    , filepath       ^>=1.4.2.1
+    , mysql-temp
+    , random         ^>=1.1
+    , typed-process  ^>=0.2.6.0
+    , unix           ^>=2.7.2.2
+
+  hs-source-dirs: bench
+
+common common-test
+  import:         common-lang
+  ghc-options:    -O2 -threaded -with-rtsopts=-N
+  build-depends:
+    , beam-core
+    , beam-mysql
+    , hspec                 ^>=2.7.1
+    , mysql-temp
+    , unordered-containers
+
+  hs-source-dirs: test
+
+-- Flags
+
+flag lenient
+  description: Be lenient when decoding (see LENIENT.md for description).
+  default:     False
+
+-- Libraries
 
 library
   import:          common-lang
-  exposed-modules:
-    Database.Beam.MySQL
-    Database.Beam.MySQL.Connection
-    Database.Beam.MySQL.FromField
-    Database.Beam.MySQL.Syntax
+  exposed-modules: Database.Beam.MySQL
+
+  if flag(lenient)
+    other-modules:
+      Database.Beam.MySQL.Connection
+      Database.Beam.MySQL.FromField.Lenient
+      Database.Beam.MySQL.Syntax
+
+  else
+    other-modules:
+      Database.Beam.MySQL.Connection
+      Database.Beam.MySQL.FromField
+      Database.Beam.MySQL.Syntax
 
   build-depends:
     , aeson                 ^>=1.4.7.1
