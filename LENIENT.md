@@ -107,5 +107,3 @@ In 'strict' mode, only ``Double`` is demandable from ``DOUBLE``, and both
 following are also demandable: 
 
 * ``Text``, as the IEEE-754 textual approximation of the value.
-* A fixed-width signed integral type, as the truncation (dropping any fractional
-  part) of the value, if said truncation would 'fit'.
