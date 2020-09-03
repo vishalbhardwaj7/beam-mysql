@@ -1,3 +1,348 @@
+{-# LANGUAGE DataKinds              #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GADTs                  #-}
+{-# LANGUAGE KindSignatures         #-}
+{-# LANGUAGE ScopedTypeVariables    #-}
+{-# LANGUAGE StandaloneDeriving     #-}
+{-# LANGUAGE TypeApplications       #-}
+
+module Database.Beam.MySQL.FromField where
+
+import           Data.Bits (Bits (zeroBits), toIntegralSized)
+import           Data.ByteString (ByteString)
+import           Data.Int (Int16, Int32, Int64, Int8)
+import           Data.Kind (Type)
+import           Data.Scientific (Scientific, toBoundedInteger)
+import           Data.Text (Text, unpack)
+import           Data.Text.Encoding (encodeUtf8)
+import           Data.Word (Word16, Word32, Word64, Word8)
+import           Database.Beam.Backend.SQL (SqlNull (SqlNull))
+import           Database.MySQL.Base (MySQLValue (..))
+import           Text.Read (readMaybe)
+
+data Leniency = Lenient | Strict
+  deriving stock (Eq, Show)
+
+data FromFieldResult (l :: Leniency) (a :: Type) where
+  UnexpectedNull :: FromFieldResult l a
+  TypeMismatch :: FromFieldResult l a
+  Won'tFit :: FromFieldResult l a
+  IEEENaN :: FromFieldResult 'Lenient a
+  IEEEInfinity :: FromFieldResult 'Lenient a
+  IEEETooSmall :: FromFieldResult 'Lenient a
+  IEEETooBig :: FromFieldResult 'Lenient a
+  TextCouldNotParse :: FromFieldResult 'Lenient a
+  LenientParse :: a -> FromFieldResult 'Lenient a
+  StrictParse :: a -> FromFieldResult l a
+
+deriving stock instance (Eq a) => Eq (FromFieldResult l a)
+
+deriving stock instance (Show a) => Show (FromFieldResult l a)
+
+deriving stock instance Functor (FromFieldResult l)
+
+newtype L (a :: Type) = L a
+  deriving newtype (Eq)
+  deriving stock (Show)
+
+class FromField (l :: Leniency) (a :: Type) | a -> l where
+  fromField :: MySQLValue -> FromFieldResult l a
+
+instance FromField 'Strict Bool where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8 v -> StrictParse (zeroBits /= v)
+    MySQLInt8U v -> StrictParse (zeroBits /= v)
+    MySQLBit v -> StrictParse (zeroBits /= v)
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Bool) where
+  {-# INLINABLE fromField #-}
+  fromField = relax . fmap L . fromField
+
+instance FromField 'Strict Int8 where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8 v -> StrictParse v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Int8) where
+  {-# INLINABLE fromField #-}
+  fromField v = fmap L $ case fromField v of
+    TypeMismatch -> case v of
+      MySQLText v'   -> tryText v'
+      MySQLDouble v' -> tryIEEE v'
+      MySQLFloat v'  -> tryIEEE v'
+      _              -> TypeMismatch
+    res          -> relax res
+
+instance FromField 'Strict Int16 where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8 v -> StrictParse . fromIntegral $ v
+    MySQLInt16 v -> StrictParse v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Int16) where
+  {-# INLINABLE fromField #-}
+  fromField v = fmap L $ case fromField v of
+    TypeMismatch -> case v of
+      MySQLText v'   -> tryText v'
+      MySQLDouble v' -> tryIEEE v'
+      MySQLFloat v'  -> tryIEEE v'
+      _              -> TypeMismatch
+    res -> relax res
+
+instance FromField 'Strict Int32 where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8 v -> StrictParse . fromIntegral $ v
+    MySQLInt16 v -> StrictParse . fromIntegral $ v
+    MySQLInt32 v -> StrictParse v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Int32) where
+  {-# INLINABLE fromField #-}
+  fromField v = fmap L $ case fromField v of
+    TypeMismatch -> case v of
+      MySQLText v'   -> tryText v'
+      MySQLDouble v' -> tryIEEE v'
+      MySQLFloat v'  -> tryIEEE v'
+      _              -> TypeMismatch
+    res -> relax res
+
+instance FromField 'Strict Int64 where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8 v -> StrictParse . fromIntegral $ v
+    MySQLInt16 v -> StrictParse . fromIntegral $ v
+    MySQLInt32 v -> StrictParse . fromIntegral $ v
+    MySQLInt64 v -> StrictParse v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Int64) where
+  {-# INLINABLE fromField #-}
+  fromField v = fmap L $ case fromField v of
+    TypeMismatch -> case v of
+      MySQLText v'   -> tryText v'
+      MySQLDouble v' -> tryIEEE v'
+      MySQLFloat v'  -> tryIEEE v'
+      _              -> TypeMismatch
+    res -> relax res
+
+instance FromField 'Strict Int where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8 v -> StrictParse . fromIntegral $ v
+    MySQLInt16 v -> StrictParse . fromIntegral $ v
+    MySQLInt32 v -> tryFixed v
+    MySQLInt64 v -> tryFixed v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Int) where
+  {-# INLINABLE fromField #-}
+  fromField v = fmap L $ case fromField v of
+    TypeMismatch -> case v of
+      MySQLText v'   -> tryText v'
+      MySQLDouble v' -> tryIEEE v'
+      MySQLFloat v'  -> tryIEEE v'
+      _              -> TypeMismatch
+    res -> relax res
+
+instance FromField 'Strict Word8 where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8U v -> StrictParse v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Word8) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict Word16 where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8U v -> StrictParse . fromIntegral $ v
+    MySQLInt16U v -> StrictParse v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Word16) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict Word32 where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8U v -> StrictParse . fromIntegral $ v
+    MySQLInt16U v -> StrictParse . fromIntegral $ v
+    MySQLInt32U v -> StrictParse v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Word32) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict Word64 where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8U v -> StrictParse . fromIntegral $ v
+    MySQLInt16U v -> StrictParse . fromIntegral $ v
+    MySQLInt32U v -> StrictParse . fromIntegral $ v
+    MySQLInt64U v -> StrictParse v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Word64) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict Word where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8U v -> StrictParse . fromIntegral $ v
+    MySQLInt16U v -> StrictParse . fromIntegral $ v
+    MySQLInt32U v -> tryFixed v
+    MySQLInt64U v -> tryFixed v
+    MySQLDecimal v -> tryScientific v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Word) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict Float where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLFloat v -> StrictParse v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Strict Double where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLFloat v -> StrictParse . realToFrac $ v
+    MySQLDouble v -> StrictParse v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+-- TODO: Lenient versions for these. - Koz
+
+instance FromField 'Strict Scientific where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLDecimal v -> StrictParse v
+    MySQLInt8 v -> StrictParse . fromIntegral $ v
+    MySQLInt8U v -> StrictParse . fromIntegral $ v
+    MySQLInt16 v -> StrictParse . fromIntegral $ v
+    MySQLInt16U v -> StrictParse . fromIntegral $ v
+    MySQLInt32 v -> StrictParse . fromIntegral $ v
+    MySQLInt32U v -> StrictParse . fromIntegral $ v
+    MySQLInt64 v -> StrictParse . fromIntegral $ v
+    MySQLInt64U v -> StrictParse . fromIntegral $ v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Scientific) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict Rational where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLInt8 v -> StrictParse . fromIntegral $ v
+    MySQLInt8U v -> StrictParse . fromIntegral $ v
+    MySQLInt16 v -> StrictParse . fromIntegral $ v
+    MySQLInt16U v -> StrictParse . fromIntegral $ v
+    MySQLInt32 v -> StrictParse . fromIntegral $ v
+    MySQLInt32U v -> StrictParse . fromIntegral $ v
+    MySQLInt64 v -> StrictParse . fromIntegral $ v
+    MySQLInt64U v -> StrictParse . fromIntegral $ v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L Rational) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict SqlNull where
+  fromField = \case
+    MySQLNull -> StrictParse SqlNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L SqlNull) where
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict ByteString where
+  fromField = \case
+    MySQLText v -> StrictParse . encodeUtf8 $ v
+    MySQLBytes v -> StrictParse v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+instance FromField 'Lenient (L ByteString) where
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict Text where
+  fromField = \case
+    MySQLText v -> StrictParse v
+    MySQLNull -> UnexpectedNull
+    _ -> TypeMismatch
+
+-- TODO: Lenient for Text. - Koz
+
+-- Helpers
+
+relax :: FromFieldResult 'Strict a -> FromFieldResult 'Lenient a
+relax = \case
+  UnexpectedNull -> UnexpectedNull
+  TypeMismatch -> TypeMismatch
+  Won'tFit -> Won'tFit
+  StrictParse x -> StrictParse x
+
+tryScientific :: (Integral a, Bounded a) =>
+  Scientific -> FromFieldResult 'Strict a
+tryScientific = maybe Won'tFit StrictParse . toBoundedInteger
+
+tryText :: (Read a) => Text -> FromFieldResult 'Lenient a
+tryText = maybe TextCouldNotParse LenientParse . readMaybe . unpack
+
+tryIEEE :: forall (b :: Type) (a :: Type) .
+  (RealFloat a, Integral b, Bounded b) =>
+  a -> FromFieldResult 'Lenient b
+tryIEEE v
+  | isNaN v = IEEENaN
+  | isInfinite v = IEEEInfinity
+  | v < fromIntegral (minBound @b) = IEEETooSmall
+  | v > fromIntegral (minBound @b) = IEEETooBig
+  | otherwise = LenientParse . truncate $ v
+
+tryFixed :: (Integral a, Integral b, Bits a, Bits b) =>
+  a -> FromFieldResult 'Strict b
+tryFixed = maybe Won'tFit StrictParse . toIntegralSized
+
+{-
+
+
+
 {-# LANGUAGE MultiWayIf #-}
 
 module Database.Beam.MySQL.FromField (FromField (..)) where
@@ -319,3 +664,4 @@ fieldTypeToString ft = "MySQL " <>
      | ft == mySQLTypeVarString -> "VarString"
      | ft == mySQLTypeString -> "String"
      | otherwise -> "Geometry" -- brittle, to fix
+      -}

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0.0
+
+* Removed `Aeson.Value` instance of `FromField`
+* Added support for a lenient mode (see LENIENT.md)
+* Reintroduce `runInsertRowReturning`
+* Improve error messages
+
 ## 1.0.0.0
 
 * Use `mysql-haskell` instead of `mysql`
