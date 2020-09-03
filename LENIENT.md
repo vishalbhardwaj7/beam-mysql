@@ -75,9 +75,9 @@ listed as demandable in 'strict' mode is also available in 'lenient' mode.
 |``MEDIUMINT``    |``Int{16,32,64}``, ``Int``, ``Rational``, ``Scientific``  |``Text``, ``Float``, ``Double``|
 |``INT``          |``Int{32,64}``, ``Int``, ``Rational``, ``Scientific``     |``Text``, ``Float``, ``Double``|
 |``BIGINT``       |``Int64``, ``Int``, ``Rational``, ``Scientific``          |``Text``, ``Float``, ``Double``|
-|-----------------|---------------------|--------------------------------------|
-|``FLOAT``        |``Float``, ``Double``|``Text``, ``Int{8,16,32,64}``, ``Int``|
-|``DOUBLE``       |``Double``           |``Text``, ``Int{8,16,32,64}``, ``Int``|
+|-----------------|---------------------|--------|
+|``FLOAT``        |``Float``, ``Double``|``Text``|
+|``DOUBLE``       |``Double``           |``Text``|
 
 ## Textual types
 
