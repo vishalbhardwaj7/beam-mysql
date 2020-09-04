@@ -13,19 +13,22 @@ import           Data.ByteString (ByteString)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
 import           Data.Scientific (Scientific, toBoundedInteger)
-import           Data.Text (Text, unpack)
+import           Data.Text (Text, pack, unpack)
 import           Data.Text.Encoding (encodeUtf8)
+import           Data.Time (Day, LocalTime (LocalTime), NominalDiffTime,
+                            TimeOfDay, daysAndTimeOfDayToTime, midnight)
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (SqlNull (SqlNull))
 import           Database.MySQL.Base (MySQLValue (..))
 import           Text.Read (readMaybe)
+import           Type.Reflection (Typeable, tyConName, typeRep, typeRepTyCon)
 
 data Leniency = Lenient | Strict
   deriving stock (Eq, Show)
 
 data FromFieldResult (l :: Leniency) (a :: Type) where
-  UnexpectedNull :: FromFieldResult l a
-  TypeMismatch :: FromFieldResult l a
+  UnexpectedNull :: {-# UNPACK #-} !Text -> FromFieldResult l a
+  TypeMismatch :: {-# UNPACK #-} !Text -> FromFieldResult l a
   Won'tFit :: FromFieldResult l a
   IEEENaN :: FromFieldResult 'Lenient a
   IEEEInfinity :: FromFieldResult 'Lenient a
@@ -54,8 +57,7 @@ instance FromField 'Strict Bool where
     MySQLInt8 v -> StrictParse (zeroBits /= v)
     MySQLInt8U v -> StrictParse (zeroBits /= v)
     MySQLBit v -> StrictParse (zeroBits /= v)
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Bool) where
   {-# INLINABLE fromField #-}
@@ -66,17 +68,16 @@ instance FromField 'Strict Int8 where
   fromField = \case
     MySQLInt8 v -> StrictParse v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Int8) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch -> case v of
+    TypeMismatch t -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch
+      _              -> TypeMismatch t
     res          -> relax res
 
 instance FromField 'Strict Int16 where
@@ -85,17 +86,16 @@ instance FromField 'Strict Int16 where
     MySQLInt8 v -> StrictParse . fromIntegral $ v
     MySQLInt16 v -> StrictParse v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Int16) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch -> case v of
+    TypeMismatch t -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch
+      _              -> TypeMismatch t
     res -> relax res
 
 instance FromField 'Strict Int32 where
@@ -105,17 +105,16 @@ instance FromField 'Strict Int32 where
     MySQLInt16 v -> StrictParse . fromIntegral $ v
     MySQLInt32 v -> StrictParse v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Int32) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch -> case v of
+    TypeMismatch t -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch
+      _              -> TypeMismatch t
     res -> relax res
 
 instance FromField 'Strict Int64 where
@@ -126,17 +125,16 @@ instance FromField 'Strict Int64 where
     MySQLInt32 v -> StrictParse . fromIntegral $ v
     MySQLInt64 v -> StrictParse v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Int64) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch -> case v of
+    TypeMismatch t -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch
+      _              -> TypeMismatch t
     res -> relax res
 
 instance FromField 'Strict Int where
@@ -147,17 +145,16 @@ instance FromField 'Strict Int where
     MySQLInt32 v -> tryFixed v
     MySQLInt64 v -> tryFixed v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Int) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch -> case v of
+    TypeMismatch t -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch
+      _              -> TypeMismatch t
     res -> relax res
 
 instance FromField 'Strict Word8 where
@@ -165,8 +162,7 @@ instance FromField 'Strict Word8 where
   fromField = \case
     MySQLInt8U v -> StrictParse v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Word8) where
   {-# INLINABLE fromField #-}
@@ -178,8 +174,7 @@ instance FromField 'Strict Word16 where
     MySQLInt8U v -> StrictParse . fromIntegral $ v
     MySQLInt16U v -> StrictParse v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Word16) where
   {-# INLINABLE fromField #-}
@@ -192,8 +187,7 @@ instance FromField 'Strict Word32 where
     MySQLInt16U v -> StrictParse . fromIntegral $ v
     MySQLInt32U v -> StrictParse v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Word32) where
   {-# INLINABLE fromField #-}
@@ -207,8 +201,7 @@ instance FromField 'Strict Word64 where
     MySQLInt32U v -> StrictParse . fromIntegral $ v
     MySQLInt64U v -> StrictParse v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Word64) where
   {-# INLINABLE fromField #-}
@@ -222,8 +215,7 @@ instance FromField 'Strict Word where
     MySQLInt32U v -> tryFixed v
     MySQLInt64U v -> tryFixed v
     MySQLDecimal v -> tryScientific v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Word) where
   {-# INLINABLE fromField #-}
@@ -233,18 +225,30 @@ instance FromField 'Strict Float where
   {-# INLINABLE fromField #-}
   fromField = \case
     MySQLFloat v -> StrictParse v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
+
+instance FromField 'Lenient (L Float) where
+  {-# INLINABLE fromField #-}
+  fromField v = fmap L $ case fromField v of
+    TypeMismatch t -> case v of
+      MySQLText v' -> tryIEEEFromText v'
+      _            -> TypeMismatch t
+    res          -> relax res
 
 instance FromField 'Strict Double where
   {-# INLINABLE fromField #-}
   fromField = \case
     MySQLFloat v -> StrictParse . realToFrac $ v
     MySQLDouble v -> StrictParse v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
--- TODO: Lenient versions for these. - Koz
+instance FromField 'Lenient (L Double) where
+  {-# INLINABLE fromField #-}
+  fromField v = fmap L $ case fromField v of
+    TypeMismatch t -> case v of
+      MySQLText v' -> tryIEEEFromText v'
+      _            -> TypeMismatch t
+    res -> relax res
 
 instance FromField 'Strict Scientific where
   {-# INLINABLE fromField #-}
@@ -258,8 +262,7 @@ instance FromField 'Strict Scientific where
     MySQLInt32U v -> StrictParse . fromIntegral $ v
     MySQLInt64 v -> StrictParse . fromIntegral $ v
     MySQLInt64U v -> StrictParse . fromIntegral $ v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Scientific) where
   {-# INLINABLE fromField #-}
@@ -276,45 +279,127 @@ instance FromField 'Strict Rational where
     MySQLInt32U v -> StrictParse . fromIntegral $ v
     MySQLInt64 v -> StrictParse . fromIntegral $ v
     MySQLInt64U v -> StrictParse . fromIntegral $ v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L Rational) where
   {-# INLINABLE fromField #-}
   fromField = fmap L . relax . fromField
 
 instance FromField 'Strict SqlNull where
+  {-# INLINABLE fromField #-}
   fromField = \case
     MySQLNull -> StrictParse SqlNull
-    _ -> TypeMismatch
+    {-
+     - This is fairly uninformative right now.
+     - However, due to how NULLable fields are parsed, that would be tricky.
+     - Thanks Beam! - Koz
+     -}
+    _ -> TypeMismatch "A non-null"
 
 instance FromField 'Lenient (L SqlNull) where
+  {-# INLINABLE fromField #-}
   fromField = fmap L . relax . fromField
 
 instance FromField 'Strict ByteString where
+  {-# INLINABLE fromField #-}
   fromField = \case
     MySQLText v -> StrictParse . encodeUtf8 $ v
     MySQLBytes v -> StrictParse v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L ByteString) where
+  {-# INLINABLE fromField #-}
   fromField = fmap L . relax . fromField
 
 instance FromField 'Strict Text where
+  {-# INLINABLE fromField #-}
   fromField = \case
     MySQLText v -> StrictParse v
-    MySQLNull -> UnexpectedNull
-    _ -> TypeMismatch
+    v -> handleNullOrMismatch v
 
--- TODO: Lenient for Text. - Koz
+instance FromField 'Lenient (L Text) where
+  {-# INLINABLE fromField #-}
+  fromField v = fmap L $ case fromField v of
+    TypeMismatch t -> case v of
+      MySQLInt8 v'    -> LenientParse . pack . show $ v'
+      MySQLInt8U v'   -> LenientParse . pack . show $ v'
+      MySQLInt16 v'   -> LenientParse . pack . show $ v'
+      MySQLInt16U v'  -> LenientParse . pack . show $ v'
+      MySQLInt32 v'   -> LenientParse . pack . show $ v'
+      MySQLInt32U v'  -> LenientParse . pack . show $ v'
+      MySQLInt64 v'   -> LenientParse . pack . show $ v'
+      MySQLInt64U v'  -> LenientParse . pack . show $ v'
+      MySQLDecimal v' -> LenientParse . pack . show $ v'
+      MySQLFloat v'   -> LenientParse . pack . show $ v'
+      MySQLDouble v'  -> LenientParse . pack . show $ v'
+      _               -> TypeMismatch t
+    res          -> relax res
+
+instance FromField 'Strict LocalTime where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLDateTime v -> StrictParse v
+    MySQLTimeStamp v -> StrictParse v
+    MySQLDate v -> StrictParse . LocalTime v $ midnight
+    v -> handleNullOrMismatch v
+
+instance FromField 'Lenient (L LocalTime) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict Day where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLDate v -> StrictParse v
+    v -> handleNullOrMismatch v
+
+instance FromField 'Lenient (L Day) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict TimeOfDay where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLTime s v ->
+      if s == zeroBits
+      then StrictParse v
+      else TypeMismatch "TimeOfDay" -- TODO: More informative error. - Koz
+    v -> handleNullOrMismatch v
+
+instance FromField 'Lenient (L TimeOfDay) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
+
+instance FromField 'Strict NominalDiffTime where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLTime s v ->
+      let ndt = daysAndTimeOfDayToTime 0 v in
+        if s == zeroBits
+        then StrictParse ndt
+        else StrictParse . negate $ ndt
+    v -> handleNullOrMismatch v
+
+instance FromField 'Lenient (L NominalDiffTime) where
+  {-# INLINABLE fromField #-}
+  fromField = fmap L . relax . fromField
 
 -- Helpers
 
+handleNullOrMismatch :: forall (a :: Type) (l :: Leniency) .
+  (Typeable a) =>
+  MySQLValue -> FromFieldResult l a
+handleNullOrMismatch = \case
+  MySQLNull -> UnexpectedNull typeName
+  _ -> TypeMismatch typeName
+  where
+    typeName :: Text
+    typeName = pack . tyConName . typeRepTyCon $ (typeRep @a)
+
 relax :: FromFieldResult 'Strict a -> FromFieldResult 'Lenient a
 relax = \case
-  UnexpectedNull -> UnexpectedNull
-  TypeMismatch -> TypeMismatch
+  UnexpectedNull t -> UnexpectedNull t
+  TypeMismatch t -> TypeMismatch t
   Won'tFit -> Won'tFit
   StrictParse x -> StrictParse x
 
@@ -339,329 +424,15 @@ tryFixed :: (Integral a, Integral b, Bits a, Bits b) =>
   a -> FromFieldResult 'Strict b
 tryFixed = maybe Won'tFit StrictParse . toIntegralSized
 
-{-
-
-
-
-{-# LANGUAGE MultiWayIf #-}
-
-module Database.Beam.MySQL.FromField (FromField (..)) where
-
-import           Data.Aeson (Value, eitherDecodeStrict')
-import           Data.Bits (finiteBitSize, zeroBits)
-import           Data.ByteString (ByteString)
-import           Data.Int (Int16, Int32, Int64, Int8)
-import           Data.Scientific (Scientific, toBoundedInteger)
-import           Data.Text (Text)
-import           Data.Text.Encoding (encodeUtf8)
-import           Data.Time.Calendar (Day)
-import           Data.Time.Clock (NominalDiffTime)
-import           Data.Time.LocalTime (LocalTime (..), TimeOfDay,
-                                      daysAndTimeOfDayToTime, midnight)
-import           Data.Word (Word16, Word32, Word64, Word8)
-import           Database.Beam.Backend.SQL (SqlNull (..))
-import           Database.Beam.Backend.SQL.Row (ColumnParseError (..))
-import           Database.MySQL.Protocol.ColumnDef (FieldType, mySQLTypeBit,
-                                                    mySQLTypeBlob,
-                                                    mySQLTypeDate,
-                                                    mySQLTypeDateTime,
-                                                    mySQLTypeDateTime2,
-                                                    mySQLTypeDecimal,
-                                                    mySQLTypeDouble,
-                                                    mySQLTypeEnum,
-                                                    mySQLTypeFloat,
-                                                    mySQLTypeInt24,
-                                                    mySQLTypeLong,
-                                                    mySQLTypeLongBlob,
-                                                    mySQLTypeLongLong,
-                                                    mySQLTypeMediumBlob,
-                                                    mySQLTypeNewDate,
-                                                    mySQLTypeNewDecimal,
-                                                    mySQLTypeNull, mySQLTypeSet,
-                                                    mySQLTypeShort,
-                                                    mySQLTypeString,
-                                                    mySQLTypeTime,
-                                                    mySQLTypeTime2,
-                                                    mySQLTypeTimestamp,
-                                                    mySQLTypeTimestamp2,
-                                                    mySQLTypeTiny,
-                                                    mySQLTypeTinyBlob,
-                                                    mySQLTypeVarChar,
-                                                    mySQLTypeVarString,
-                                                    mySQLTypeYear)
-import           Database.MySQL.Protocol.MySQLValue (MySQLValue (..))
-import           Fmt ((+|), (|+))
-
-class FromField a where
-  fromField :: FieldType -> MySQLValue -> Either ColumnParseError a
-
-instance FromField Bool where
-  fromField t = \case
-    MySQLInt8 v  -> pure (zeroBits /= v)
-    MySQLInt8U v -> pure (zeroBits /= v)
-    MySQLBit v   -> pure (zeroBits /= v)
-    MySQLNull    -> Left ColumnUnexpectedNull
-    v            -> throwTypeMismatch "Bool" t v
-
-instance FromField Int8 where
-  fromField t = \case
-    MySQLInt8 v    -> pure v
-    MySQLDecimal v -> tryPackDecimal "Int8" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Int8" t v
-
-instance FromField Int16 where
-  fromField t = \case
-    MySQLInt8 v    -> pure . fromIntegral $ v
-    MySQLInt16 v   -> pure v
-    MySQLDecimal v -> tryPackDecimal "Int16" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Int16" t v
-
-instance FromField Int32 where
-  fromField t = \case
-    MySQLInt8 v    -> pure . fromIntegral $ v
-    MySQLInt16 v   -> pure . fromIntegral $ v
-    MySQLInt32 v   -> pure v
-    MySQLDecimal v -> tryPackDecimal "Int32" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Int32" t v
-
-instance FromField Int64 where
-  fromField t = \case
-    MySQLInt8 v    -> pure . fromIntegral $ v
-    MySQLInt16 v   -> pure . fromIntegral $ v
-    MySQLInt32 v   -> pure . fromIntegral $ v
-    MySQLInt64 v   -> pure v
-    MySQLDecimal v -> tryPackDecimal "Int64" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Int64" t v
-
-instance FromField Int where
-  fromField t = \case
-    MySQLInt8 v    -> pure . fromIntegral $ v
-    MySQLInt16 v   -> pure . fromIntegral $ v
-    MySQLInt32 v   -> pure . fromIntegral $ v
-    MySQLInt64 v   ->
-      if finiteBitSize (zeroBits :: Int) == 64
-        then pure . fromIntegral $ v
-        else throwTypeMismatch "Int" t (MySQLInt64 v)
-    MySQLDecimal v -> tryPackDecimal "Int" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Int" t v
-
-instance FromField Word8 where
-  fromField t = \case
-    MySQLInt8U v   -> pure v
-    MySQLDecimal v -> tryPackDecimal "Word8" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Word8" t v
-
-instance FromField Word16 where
-  fromField t = \case
-    MySQLInt8U v   -> pure . fromIntegral $ v
-    MySQLInt16U v  -> pure v
-    MySQLDecimal v -> tryPackDecimal "Word16" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Word16" t v
-
-instance FromField Word32 where
-  fromField t = \case
-    MySQLInt8U v   -> pure . fromIntegral $ v
-    MySQLInt16U v  -> pure . fromIntegral $ v
-    MySQLInt32U v  -> pure v
-    MySQLDecimal v -> tryPackDecimal "Word32" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Word32" t v
-
-instance FromField Word64 where
-  fromField t = \case
-    MySQLInt8U v   -> pure . fromIntegral $ v
-    MySQLInt16U v  -> pure . fromIntegral $ v
-    MySQLInt32U v  -> pure . fromIntegral $ v
-    MySQLInt64U v  -> pure v
-    MySQLDecimal v -> tryPackDecimal "Word64" v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Word64" t v
-
-instance FromField Word where
-  fromField t = \case
-    MySQLInt8U v  -> pure . fromIntegral $ v
-    MySQLInt16U v -> pure . fromIntegral $ v
-    MySQLInt32U v -> pure . fromIntegral $ v
-    MySQLInt64U v ->
-      if finiteBitSize (zeroBits :: Word) == 64
-      then pure . fromIntegral $ v
-      else throwTypeMismatch "Word" t (MySQLInt64U v)
-    MySQLNull     -> Left ColumnUnexpectedNull
-    v             -> throwTypeMismatch "Word" t v
-
-instance FromField Float where
-  fromField t = \case
-    MySQLFloat v -> pure v
-    MySQLNull    -> Left ColumnUnexpectedNull
-    v            -> throwTypeMismatch "Float" t v
-
-instance FromField Double where
-  fromField t = \case
-    MySQLFloat v  -> pure . realToFrac $ v
-    MySQLDouble v -> pure v
-    MySQLNull     -> Left ColumnUnexpectedNull
-    v             -> throwTypeMismatch "Double" t v
-
-instance FromField Scientific where
-  fromField t = \case
-    MySQLDecimal v -> pure v
-    MySQLInt8 v    -> pure . fromIntegral $ v
-    MySQLInt8U v   -> pure . fromIntegral $ v
-    MySQLInt16 v   -> pure . fromIntegral $ v
-    MySQLInt16U v  -> pure . fromIntegral $ v
-    MySQLInt32 v   -> pure . fromIntegral $ v
-    MySQLInt32U v  -> pure . fromIntegral $ v
-    MySQLInt64 v   -> pure . fromIntegral $ v
-    MySQLInt64U v  -> pure . fromIntegral $ v
-    MySQLNull      -> Left ColumnUnexpectedNull
-    v              -> throwTypeMismatch "Scientific" t v
-
-instance FromField Rational where
-  fromField t = \case
-    MySQLInt8 v   -> pure . fromIntegral $ v
-    MySQLInt8U v  -> pure . fromIntegral $ v
-    MySQLInt16 v  -> pure . fromIntegral $ v
-    MySQLInt16U v -> pure . fromIntegral $ v
-    MySQLInt32 v  -> pure . fromIntegral $ v
-    MySQLInt32U v -> pure . fromIntegral $ v
-    MySQLInt64 v  -> pure . fromIntegral $ v
-    MySQLInt64U v -> pure . fromIntegral $ v
-    MySQLNull     -> Left ColumnUnexpectedNull
-    v             -> throwTypeMismatch "Rational" t v
-
-instance FromField SqlNull where
-  fromField t v = case v of
-    MySQLNull -> pure SqlNull
-    _         -> Left errorMsg
-    where
-      errorMsg :: ColumnParseError
-      errorMsg = ColumnTypeMismatch "Present value" "NULL" msg
-      msg :: String
-      msg = "Unexpected actual value of type" <>
-            fieldTypeToString t <>
-            " with value " <>
-            show v
-
-instance FromField ByteString where
-  fromField t = \case
-    MySQLText v  -> pure . encodeUtf8 $ v
-    MySQLBytes v -> pure v
-    MySQLNull    -> Left ColumnUnexpectedNull
-    v            -> throwTypeMismatch "ByteString" t v
-
-instance FromField Text where
-  fromField t = \case
-    MySQLText v  -> pure v
-    MySQLBytes v ->
-      Left . ColumnTypeMismatch "Text" (fieldTypeToString t) . bytesErr $ v
-    MySQLNull    -> Left ColumnUnexpectedNull
-    v            -> throwTypeMismatch "Text" t v
-    where
-      bytesErr :: ByteString -> String
-      bytesErr v = "Tried to read bytes as text: " +|
-                   show v |+
-                   ""
-
-instance FromField LocalTime where
-  fromField t = \case
-    MySQLDateTime v  -> pure v
-    MySQLTimeStamp v -> pure v
-    MySQLDate v      -> pure (LocalTime v midnight)
-    MySQLNull        -> Left ColumnUnexpectedNull
-    v                -> throwTypeMismatch "LocalTime" t v
-
-instance FromField Day where
-  fromField t = \case
-    MySQLDate v -> pure v
-    MySQLNull   -> Left ColumnUnexpectedNull
-    v           -> throwTypeMismatch "Day" t v
-
-instance FromField TimeOfDay where
-  fromField t = \case
-    MySQLTime s v ->
-      if s == zeroBits
-        then pure v
-        else throwTypeMismatch "TimeOfDay" t (MySQLTime s v)
-    MySQLNull     -> Left ColumnUnexpectedNull
-    v             -> throwTypeMismatch "TimeOfDay" t v
-
-instance FromField NominalDiffTime where
-  fromField t = \case
-    MySQLTime s v -> do
-      let isPositive = s == zeroBits
-      let ndt = daysAndTimeOfDayToTime 0 v
-      if isPositive
-        then pure ndt
-        else pure . negate $ ndt
-    MySQLNull     -> Left ColumnUnexpectedNull
-    v             -> throwTypeMismatch "NominalDiffTime" t v
-
-instance FromField Value where
-  fromField t = \case
-    MySQLText v  -> case eitherDecodeStrict' . encodeUtf8 $ v of
-      Left err  -> Left . ColumnErrorInternal $ "JSON parsing failed: " <> err
-      Right val -> pure val
-    MySQLBytes v -> case eitherDecodeStrict' v of
-      Left err  -> Left . ColumnErrorInternal $ "JSON parsing failed: " <> err
-      Right val -> pure val
-    MySQLNull    -> Left ColumnUnexpectedNull
-    v            -> throwTypeMismatch "Aeson.Value" t v
-
--- Helpers
-
-tryPackDecimal :: (Integral a, Bounded a) =>
-  String -> Scientific -> Either ColumnParseError a
-tryPackDecimal typeName = maybe throwDecimalWon'tFit pure . toBoundedInteger
-  where
-    throwDecimalWon'tFit =
-      Left . ColumnErrorInternal $ typeName <> " cannot store this DECIMAL"
-
-throwTypeMismatch ::
-  String -> FieldType -> MySQLValue -> Either ColumnParseError a
-throwTypeMismatch typeName ft v =
-  Left . ColumnTypeMismatch typeName (fieldTypeToString ft) $ value
-  where
-    value :: String
-    value = "Value found: " +| show v |+ ""
-
--- Stringification of type names
-fieldTypeToString :: FieldType -> String
-fieldTypeToString ft = "MySQL " <>
-  if | ft == mySQLTypeDecimal -> "Decimal"
-     | ft == mySQLTypeTiny -> "Tiny"
-     | ft == mySQLTypeShort -> "Short"
-     | ft == mySQLTypeLong -> "Long"
-     | ft == mySQLTypeFloat -> "Float"
-     | ft == mySQLTypeDouble -> "Double"
-     | ft == mySQLTypeNull -> "Null"
-     | ft == mySQLTypeTimestamp -> "Timestamp"
-     | ft == mySQLTypeLongLong -> "LongLong"
-     | ft == mySQLTypeInt24 -> "Int24"
-     | ft == mySQLTypeDate -> "Date"
-     | ft == mySQLTypeTime -> "Time"
-     | ft == mySQLTypeDateTime -> "DateTime"
-     | ft == mySQLTypeYear -> "Year"
-     | ft == mySQLTypeNewDate -> "NewDate"
-     | ft == mySQLTypeVarChar -> "VarChar"
-     | ft == mySQLTypeBit -> "Bit"
-     | ft == mySQLTypeTimestamp2 -> "Timestamp2"
-     | ft == mySQLTypeDateTime2 -> "DateTime2"
-     | ft == mySQLTypeTime2 -> "Time2"
-     | ft == mySQLTypeNewDecimal -> "NewDecimal"
-     | ft == mySQLTypeEnum -> "Enum"
-     | ft == mySQLTypeSet -> "Set"
-     | ft == mySQLTypeTinyBlob -> "TinyBlob"
-     | ft == mySQLTypeMediumBlob -> "MediumBlob"
-     | ft == mySQLTypeLongBlob -> "LongBlob"
-     | ft == mySQLTypeBlob -> "Blob"
-     | ft == mySQLTypeVarString -> "VarString"
-     | ft == mySQLTypeString -> "String"
-     | otherwise -> "Geometry" -- brittle, to fix
-      -}
+tryIEEEFromText :: (Read a, RealFloat a) =>
+  Text -> FromFieldResult 'Lenient a
+tryIEEEFromText = \case
+  "Infinity" -> LenientParse . read $ "Infinity"
+  "-Infinity" -> LenientParse . read $ "-Infinity"
+  t -> case readMaybe . unpack $ t of
+    Nothing -> TextCouldNotParse
+    Just v -> if isInfinite v
+              then case signum v of
+                -1 -> IEEETooSmall
+                _  -> IEEETooBig
+              else LenientParse v

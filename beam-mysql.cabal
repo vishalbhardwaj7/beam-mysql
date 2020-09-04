@@ -86,18 +86,12 @@ flag lenient
 library
   import:          common-lang
   exposed-modules: Database.Beam.MySQL
-
-  if flag(lenient)
-    other-modules:
-      Database.Beam.MySQL.Connection
-      Database.Beam.MySQL.FromField.Lenient
-      Database.Beam.MySQL.Syntax
-
-  else
-    other-modules:
-      Database.Beam.MySQL.Connection
-      Database.Beam.MySQL.FromField
-      Database.Beam.MySQL.Syntax
+  other-modules:
+    Database.Beam.MySQL.Connection
+    Database.Beam.MySQL.Extra
+    Database.Beam.MySQL.FromField
+    Database.Beam.MySQL.Syntax
+    Database.Beam.MySQL.Utils
 
   build-depends:
     , aeson                 ^>=1.4.7.1
@@ -114,6 +108,9 @@ library
     , time                  ^>=1.9.3
     , unordered-containers  ^>=0.2.10.0
     , vector                ^>=0.12.1.2
+
+  if flag(lenient)
+    cpp-options: -DLENIENT
 
   hs-source-dirs:  src
 

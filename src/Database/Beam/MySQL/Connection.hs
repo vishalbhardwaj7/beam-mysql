@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP                 #-}
+{-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
 
@@ -5,66 +7,56 @@ module Database.Beam.MySQL.Connection (
   MySQL (..),
   MySQLM (..),
   ColumnDecodeError (..),
-  runBeamMySQL, runBeamMySQLDebug, runInsertRowReturning
+  runBeamMySQL, runBeamMySQLDebug, -- runInsertRowReturning
   ) where
 
 import           Control.Exception.Safe (Exception, MonadCatch, MonadMask,
-                                         MonadThrow, bracket, catch, handle,
-                                         throw, throwIO)
+                                         MonadThrow, bracket, throw)
 import           Control.Monad (void)
-import           Control.Monad.Except (Except, MonadError, catchError,
-                                       runExcept, throwError)
-import           Control.Monad.Free.Church (iterM)
+import           Control.Monad.Except (ExceptT, MonadError, catchError,
+                                       runExceptT, throwError)
+import           Control.Monad.Free.Church (F, iterM)
 import           Control.Monad.IO.Class (MonadIO (..))
-import           Control.Monad.Reader (ReaderT (..), ask, asks, runReaderT)
-import           Control.Monad.State.Strict (StateT, evalStateT, get, modify,
-                                             put)
-import           Control.Monad.Trans (lift)
-import           Data.Aeson (Value)
-import           Data.Bifunctor (first)
+import           Control.Monad.Reader (MonadReader (ask), ReaderT (..), asks,
+                                       runReaderT)
+import           Control.Monad.RWS.Strict (RWS, runRWS)
+import           Control.Monad.State.Strict (MonadState (get, put), modify)
 import           Data.ByteString (ByteString)
-import           Data.Foldable (fold)
-import           Data.Functor.Identity (Identity)
-import           Data.HashMap.Strict as HM
 import           Data.HashSet (HashSet)
-import qualified Data.HashSet as HS
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
-import           Data.List (intersperse)
 import           Data.Scientific (Scientific)
 import           Data.Text (Text)
-import           Data.Text.Lazy (fromStrict)
-import           Data.Text.Lazy.Encoding (encodeUtf8)
 import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
 import           Data.Vector (Vector)
 import qualified Data.Vector as V
 import           Data.Word (Word16, Word32, Word64, Word8)
-import           Database.Beam.Backend (BeamBackend (..), BeamRowReadError (..),
-                                        BeamSqlBackend, BeamSqlBackendSyntax,
+import           Database.Beam.Backend (BeamBackend (..), BeamSqlBackend,
+                                        BeamSqlBackendSyntax,
                                         FromBackendRow (..),
                                         FromBackendRowF (..),
-                                        FromBackendRowM (..), MonadBeam (..),
-                                        insertCmd)
+                                        FromBackendRowM (..), MonadBeam (..))
 import           Database.Beam.Backend.SQL (BeamSqlBackendIsString, SqlNull)
-import           Database.Beam.MySQL.FromField (FromField (..))
-import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (..),
-                                             MysqlInsertValuesSyntax (..),
-                                             MysqlSyntax (..),
-                                             MysqlTableNameSyntax (..),
-                                             backtickWrap, defaultE,
-                                             intoDebugText, intoQuery,
-                                             intoTableName, textSyntax)
+import qualified Database.Beam.MySQL.FromField as FromField
+import           Database.Beam.MySQL.Utils (toSQLTypeName)
+#ifdef LENIENT
+import           Database.Beam.MySQL.FromField (FromField (..),
+                                                Leniency (Lenient))
+#else
+import           Database.Beam.MySQL.FromField (FromField (..),
+                                                Leniency (Strict))
+#endif
+import           Database.Beam.MySQL.Syntax (MysqlSyntax (..), intoDebugText,
+                                             intoQuery)
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
-                                      HasSqlQuantifiedEqualityCheck,
-                                      SqlInsert (..), SqlSelect (..),
-                                      runSelectReturningOne)
+                                      HasSqlQuantifiedEqualityCheck)
 import           Database.Beam.Query.SQL92 (buildSql92Query')
-import           Database.MySQL.Base (FieldType, MySQLConn, MySQLValue (..),
-                                      Query (..), columnType, execute_,
-                                      okAffectedRows, queryVector_, skipToEof)
-import           Prelude hiding (mapM, read)
-import           System.IO.Streams (InputStream, peek, read)
-import           System.IO.Streams.Combinators (foldM, mapM)
+import           Database.MySQL.Base (ColumnDef, FieldType, MySQLConn,
+                                      MySQLValue (..), Query (..), columnType,
+                                      execute_, queryVector_, skipToEof)
+import           Prelude hiding (map, mapM, read)
+import           System.IO.Streams (InputStream, read)
+import           System.IO.Streams.Combinators (map, mapM)
 import qualified System.IO.Streams.List as S
 
 data MySQL = MySQL
@@ -73,8 +65,13 @@ instance BeamSqlBackendIsString MySQL String
 
 instance BeamSqlBackendIsString MySQL Text
 
+#ifdef LENIENT
 instance BeamBackend MySQL where
-  type BackendFromField MySQL = FromField
+  type BackendFromField MySQL = FromField 'Lenient
+#else
+instance BeamBackend MySQL where
+  type BackendFromField MySQL = FromField 'Strict
+#endif
 
 instance BeamSqlBackend MySQL
 
@@ -211,12 +208,221 @@ instance HasSqlEqualityCheck MySQL NominalDiffTime
 
 instance HasSqlQuantifiedEqualityCheck MySQL NominalDiffTime
 
-instance FromBackendRow MySQL Value
+data ColumnDecodeError =
+  UnexpectedNullError {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word
+    }
+  deriving stock (Eq, Show)
 
-instance HasSqlEqualityCheck MySQL Value
+instance Exception ColumnDecodeError
 
-instance HasSqlQuantifiedEqualityCheck MySQL Value
+-- Small helper for our environment
+data MySQLMEnv =
+  DebugEnv !(Text -> IO ())
+           {-# UNPACK #-} !MySQLConn |
+  ReleaseEnv {-# UNPACK #-} !MySQLConn
 
+-- Operational monad
+newtype MySQLM (a :: Type) = MySQLM (ReaderT MySQLMEnv IO a)
+  deriving newtype (Functor,
+                    Applicative,
+                    Monad,
+                    MonadIO,
+                    MonadMask,
+                    MonadCatch,
+                    MonadThrow)
+
+instance MonadFail MySQLM where
+  fail err = error ("Internal error with: " <> err)
+
+instance MonadBeam MySQL MySQLM where
+  {-# INLINABLE runNoReturn #-}
+  runNoReturn sql@(MysqlSyntax (_, _)) = do
+    (statement, conn) <- processAndLog sql
+    -- TODO: Error capture. - Koz
+    void . liftIO . execute_ conn $ statement
+  {-# INLINABLE runReturningOne #-}
+  runReturningOne sql@(MysqlSyntax (tables, _)) = do
+    (statement, conn) <- processAndLog sql
+    bracket (acquireStream conn statement)
+            drainStream
+            (processOneResult tables)
+  {-# INLINABLE runReturningList #-}
+  runReturningList sql@(MysqlSyntax (tables, _)) = do
+    (statement, conn) <- processAndLog sql
+    bracket (acquireStream conn statement)
+            drainStream
+            (\stream -> liftIO (S.toList =<< parseRowsIO tables stream))
+  {-# INLINABLE runReturningMany #-}
+  runReturningMany sql@(MysqlSyntax (tables, _)) callback = do
+    (statement, conn) <- processAndLog sql
+    bracket (acquireStream conn statement)
+            drainStream
+            (\stream -> callback $ liftIO (read =<< parseRowsIO tables stream))
+
+-- Run without debugging
+runBeamMySQL :: MySQLConn -> MySQLM a -> IO a
+runBeamMySQL conn (MySQLM comp) = runReaderT comp . ReleaseEnv $ conn
+
+-- Run with debugging
+runBeamMySQLDebug :: (Text -> IO ()) -> MySQLConn -> MySQLM a -> IO a
+runBeamMySQLDebug dbg conn (MySQLM comp) =
+  runReaderT comp . DebugEnv dbg $ conn
+
+-- TODO: runInsertRowReturning. - Koz
+
+-- Helpers
+
+-- Removes some duplication from MonadBeam instance
+
+processAndLog :: MysqlSyntax -> MySQLM (Query, MySQLConn)
+processAndLog sql = do
+  let statement = intoQuery sql
+  env <- MySQLM ask
+  conn <- case env of
+    DebugEnv dbg conn -> do
+      liftIO . dbg . intoDebugText $ sql
+      pure conn
+    ReleaseEnv conn   -> pure conn
+  pure (statement, conn)
+
+acquireStream :: (MonadIO m) =>
+  MySQLConn -> Query -> m (InputStream (Vector (FieldType, MySQLValue)))
+acquireStream conn q = liftIO (queryVector_ conn q >>= go)
+  where
+    go :: (Vector ColumnDef, InputStream (Vector MySQLValue)) ->
+          IO (InputStream (Vector (FieldType, MySQLValue)))
+    go (v, stream) = map (V.zip (V.map columnType v)) stream
+
+drainStream :: (MonadIO m) => InputStream a -> m ()
+drainStream = liftIO . skipToEof
+
+processOneResult :: forall (a :: Type) .
+  (FromBackendRow MySQL a) =>
+  HashSet Text -> InputStream (Vector (FieldType, MySQLValue)) -> MySQLM (Maybe a)
+processOneResult tables stream = do
+  mRes <- liftIO . read $ stream
+  case mRes of
+    Nothing  -> pure Nothing
+    Just res -> case runDecode (iterM decodeFromRow churched) res of
+      Left (err, ix) -> throw . toDecodeError tables res ix $ err
+      Right x        -> pure . Just $ x
+  where
+    churched :: F (FromBackendRowF MySQL) a
+    FromBackendRowM churched = fromBackendRow
+
+parseRowsIO :: forall (a :: Type) .
+  (FromBackendRow MySQL a) =>
+  HashSet Text ->
+  InputStream (Vector (FieldType, MySQLValue)) ->
+  IO (InputStream a)
+parseRowsIO tables = mapM go
+  where
+    go :: Vector (FieldType, MySQLValue) -> IO a
+    go v = case runDecode (iterM decodeFromRow churched) v of
+      Left (err, ix) -> throw . toDecodeError tables v ix $ err
+      Right x        -> pure x
+    churched :: F (FromBackendRowF MySQL) a
+    FromBackendRowM churched = fromBackendRow
+
+toDecodeError ::
+  HashSet Text ->
+  Vector (FieldType, MySQLValue) ->
+  Int ->
+  DecodeError ->
+  ColumnDecodeError
+toDecodeError tables v ix = \case
+  UnexpectedNull t ->
+    UnexpectedNullError t ft tables (fromIntegral ix)
+  where
+    ft :: Text
+    ft = toSQLTypeName . fst $ v V.! ix
+
+-- Decoding from a row is complex enough to warrant its own operators and an
+-- explicit stack.
+
+data DecodeError =
+  UnexpectedNull {-# UNPACK #-} !Text |
+  TypeMismatch {-# UNPACK #-} !Text |
+  Won'tFit |
+  IEEENaN |
+  IEEEInfinity |
+  IEEETooSmall |
+  IEEETooBig |
+  TextCouldNotParse |
+  RowExhausted |
+  BeamInternal -- This shouldn't ever appear.
+  deriving stock (Eq, Show)
+
+newtype Decode (a :: Type) =
+  Decode (ExceptT DecodeError (RWS (Vector (FieldType, MySQLValue)) () Int) a)
+  deriving newtype (Functor,
+                    Applicative,
+                    Monad,
+                    MonadError DecodeError,
+                    MonadReader (Vector (FieldType, MySQLValue)),
+                    MonadState Int)
+
+runDecode :: forall (a :: Type) .
+  Decode a -> Vector (FieldType, MySQLValue) -> Either (DecodeError, Int) a
+runDecode (Decode comp) v = go . runExceptT $ comp
+  where
+    go ::
+      RWS (Vector (FieldType, MySQLValue)) () Int (Either DecodeError a) ->
+      Either (DecodeError, Int) a
+    go comp' = case runRWS comp' v 0 of
+      (Left err, ix, _) -> Left (err, ix)
+      (Right res, _, _) -> Right res
+
+currentValue :: Decode (Maybe (FieldType, MySQLValue))
+currentValue = do
+  ix <- get
+  asks (V.!? ix)
+
+advanceIndex :: Decode ()
+advanceIndex = modify succ
+
+decodeFromRow :: FromBackendRowF MySQL (Decode a) -> Decode a
+decodeFromRow = \case
+  ParseOneField callback -> do
+    curr <- currentValue
+    case curr of
+      Nothing        -> throwError RowExhausted
+      -- TODO: Seems like field types are unnecessary. - Koz
+      Just (_, val) -> case fromField val of
+        FromField.UnexpectedNull t -> throwError (UnexpectedNull t)
+        FromField.TypeMismatch t   -> throwError (TypeMismatch t)
+        FromField.Won'tFit         -> throwError Won'tFit
+        FromField.StrictParse x    -> advanceIndex >> callback x
+        {-
+         - TODO: Write a version of this for lenient parsing. - Koz
+        FromField.IEEENaN           -> throwError IEEENaN
+        FromField.IEEEInfinity      -> throwError IEEEInfinity
+        FromField.IEEETooSmall      -> throwError IEEETooSmall
+        FromField.IEEETooBig        -> throwError IEEETooBig
+        FromField.TextCouldNotParse -> throwError TextCouldNotParse
+        FromField.LenientParse x    -> advanceIndex >> callback x
+        -}
+  Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
+    ix <- get
+    -- The 'catch-in-catch' here is needed due to the rather peculiar way beam
+    -- parses NULLable columns. Essentially, it first tries to grab a non-NULL
+    -- value, then, if it fails, tries to unconditionally grab a NULL.
+    --
+    -- This is encoded as an Alt. Therefore, if we don't want strange false
+    -- positives regarding NULL parses, we have to forward the _first_ error we
+    -- saw.
+    catchError (callback =<< iterM decodeFromRow opt1)
+               (\err -> do
+                  put ix -- restore our state to how it was
+                  catchError (callback =<< iterM decodeFromRow opt2)
+                             (\_ -> throwError err))
+  FailParseWith _ -> throwError BeamInternal
+
+{-
 -- A more useful error context for beam decoding errors
 data ColumnDecodeError = ColumnDecodeError {
   tableNames :: !(HashSet Text),
@@ -485,3 +691,5 @@ decodeFromRow fieldTypes values = case runDecode (iterM go churched) fieldTypes 
 -- (namely, tables involved).
 rethrowBeamRowError :: HashSet Text -> BeamRowReadError -> MySQLM a
 rethrowBeamRowError tables = throw . ColumnDecodeError tables
+
+-}
