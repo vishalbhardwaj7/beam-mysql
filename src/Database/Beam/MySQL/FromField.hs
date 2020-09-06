@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE StandaloneDeriving     #-}
 {-# LANGUAGE TypeApplications       #-}
+{-# LANGUAGE UndecidableInstances   #-}
 
 module Database.Beam.MySQL.FromField where
 
@@ -22,20 +23,21 @@ import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (SqlNull (SqlNull))
 import           Database.MySQL.Base (MySQLValue (..))
 import           Text.Read (readMaybe)
-import           Type.Reflection (Typeable, tyConName, typeRep, typeRepTyCon)
+import           Type.Reflection (TyCon, Typeable, tyConName, typeRep,
+                                  typeRepTyCon)
 
 data Leniency = Lenient | Strict
   deriving stock (Eq, Show)
 
 data FromFieldResult (l :: Leniency) (a :: Type) where
-  UnexpectedNull :: {-# UNPACK #-} !Text -> FromFieldResult l a
-  TypeMismatch :: {-# UNPACK #-} !Text -> FromFieldResult l a
-  Won'tFit :: {-# UNPACK #-} !Text -> FromFieldResult l a
-  IEEENaN :: FromFieldResult 'Lenient a
-  IEEEInfinity :: FromFieldResult 'Lenient a
-  IEEETooSmall :: FromFieldResult 'Lenient a
-  IEEETooBig :: FromFieldResult 'Lenient a
-  TextCouldNotParse :: FromFieldResult 'Lenient a
+  UnexpectedNull' :: FromFieldResult l a
+  TypeMismatch' :: FromFieldResult l a
+  Won'tFit' :: FromFieldResult l a
+  IEEENaN' :: FromFieldResult 'Lenient a
+  IEEEInfinity' :: FromFieldResult 'Lenient a
+  IEEETooSmall' :: FromFieldResult 'Lenient a
+  IEEETooBig' :: FromFieldResult 'Lenient a
+  TextCouldNotParse' :: FromFieldResult 'Lenient a
   LenientParse :: a -> FromFieldResult 'Lenient a
   StrictParse :: a -> FromFieldResult l a
 
@@ -74,11 +76,11 @@ instance FromField 'Strict Int8 where
 instance FromField 'Lenient (L Int8) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch t -> case v of
+    TypeMismatch' -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch t
+      _              -> TypeMismatch'
     res          -> relax res
 
 instance FromField 'Strict Int16 where
@@ -92,11 +94,11 @@ instance FromField 'Strict Int16 where
 instance FromField 'Lenient (L Int16) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch t -> case v of
+    TypeMismatch' -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch t
+      _              -> TypeMismatch'
     res -> relax res
 
 instance FromField 'Strict Int32 where
@@ -111,11 +113,11 @@ instance FromField 'Strict Int32 where
 instance FromField 'Lenient (L Int32) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch t -> case v of
+    TypeMismatch' -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch t
+      _              -> TypeMismatch'
     res -> relax res
 
 instance FromField 'Strict Int64 where
@@ -131,11 +133,11 @@ instance FromField 'Strict Int64 where
 instance FromField 'Lenient (L Int64) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch t -> case v of
+    TypeMismatch' -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch t
+      _              -> TypeMismatch'
     res -> relax res
 
 instance FromField 'Strict Int where
@@ -151,11 +153,11 @@ instance FromField 'Strict Int where
 instance FromField 'Lenient (L Int) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch t -> case v of
+    TypeMismatch' -> case v of
       MySQLText v'   -> tryText v'
       MySQLDouble v' -> tryIEEE v'
       MySQLFloat v'  -> tryIEEE v'
-      _              -> TypeMismatch t
+      _              -> TypeMismatch'
     res -> relax res
 
 instance FromField 'Strict Word8 where
@@ -231,9 +233,9 @@ instance FromField 'Strict Float where
 instance FromField 'Lenient (L Float) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch t -> case v of
+    TypeMismatch' -> case v of
       MySQLText v' -> tryIEEEFromText v'
-      _            -> TypeMismatch t
+      _            -> TypeMismatch'
     res          -> relax res
 
 instance FromField 'Strict Double where
@@ -246,9 +248,9 @@ instance FromField 'Strict Double where
 instance FromField 'Lenient (L Double) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch t -> case v of
+    TypeMismatch' -> case v of
       MySQLText v' -> tryIEEEFromText v'
-      _            -> TypeMismatch t
+      _            -> TypeMismatch'
     res -> relax res
 
 instance FromField 'Strict Scientific where
@@ -290,12 +292,7 @@ instance FromField 'Strict SqlNull where
   {-# INLINABLE fromField #-}
   fromField = \case
     MySQLNull -> StrictParse SqlNull
-    {-
-     - This is fairly uninformative right now.
-     - However, due to how NULLable fields are parsed, that would be tricky.
-     - Thanks Beam! - Koz
-     -}
-    _ -> TypeMismatch "A non-null"
+    _ -> TypeMismatch'
 
 instance FromField 'Lenient (L SqlNull) where
   {-# INLINABLE fromField #-}
@@ -321,7 +318,7 @@ instance FromField 'Strict Text where
 instance FromField 'Lenient (L Text) where
   {-# INLINABLE fromField #-}
   fromField v = fmap L $ case fromField v of
-    TypeMismatch t -> case v of
+    TypeMismatch' -> case v of
       MySQLInt8 v'    -> LenientParse . pack . show $ v'
       MySQLInt8U v'   -> LenientParse . pack . show $ v'
       MySQLInt16 v'   -> LenientParse . pack . show $ v'
@@ -333,7 +330,7 @@ instance FromField 'Lenient (L Text) where
       MySQLDecimal v' -> LenientParse . pack . show $ v'
       MySQLFloat v'   -> LenientParse . pack . show $ v'
       MySQLDouble v'  -> LenientParse . pack . show $ v'
-      _               -> TypeMismatch t
+      _               -> TypeMismatch'
     res          -> relax res
 
 instance FromField 'Strict LocalTime where
@@ -364,7 +361,7 @@ instance FromField 'Strict TimeOfDay where
     MySQLTime s v ->
       if s == zeroBits
       then StrictParse v
-      else TypeMismatch "TimeOfDay" -- TODO: More informative error. - Koz
+      else TypeMismatch' -- TODO: More informative error. - Koz
     v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L TimeOfDay) where
@@ -385,48 +382,94 @@ instance FromField 'Lenient (L NominalDiffTime) where
   {-# INLINABLE fromField #-}
   fromField = fmap L . relax . fromField
 
+data StrictDecodeError =
+  UnexpectedNull {-# UNPACK #-} !TyCon |
+  TypeMismatch {-# UNPACK #-} !TyCon |
+  Won'tFit {-# UNPACK #-} !TyCon
+  deriving stock (Eq, Show)
+
+data LenientDecodeError =
+  SomeStrictError !StrictDecodeError |
+  IEEENaN {-# UNPACK #-} !TyCon |
+  IEEEInfinity {-# UNPACK #-} !TyCon |
+  IEEETooSmall {-# UNPACK #-} !TyCon |
+  IEEETooBig {-# UNPACK #-} !TyCon |
+  TextCouldNotParse {-# UNPACK #-} !TyCon
+  deriving stock (Eq, Show)
+
+-- WARNING: Do _not_ write any instances of these classes! They are a trick to
+-- avoid having to define everything 'beam' demands of us twice.
+
+class FromFieldS (a :: Type) where
+  fromFieldS :: MySQLValue -> Either StrictDecodeError a
+
+class FromFieldL (a :: Type) where
+  fromFieldL :: MySQLValue -> Either LenientDecodeError a
+
+instance (FromField 'Strict a, Typeable a) => FromFieldS a where
+  {-# INLINABLE fromFieldS #-}
+  fromFieldS v = case fromField v of
+    UnexpectedNull' -> Left . UnexpectedNull $ tyConOf @a
+    TypeMismatch'   -> Left . TypeMismatch $ tyConOf @a
+    Won'tFit'       -> Left . Won'tFit $ tyConOf @a
+    StrictParse v'  -> Right v'
+
+instance (FromField 'Lenient (L a), Typeable a) => FromFieldL a where
+  {-# INLINABLE fromFieldL #-}
+  fromFieldL v = case fromField v of
+    UnexpectedNull' -> Left . SomeStrictError . UnexpectedNull $ tyConOf @a
+    TypeMismatch' -> Left . SomeStrictError . TypeMismatch $ tyConOf @a
+    Won'tFit' -> Left . SomeStrictError . Won'tFit $ tyConOf @a
+    IEEENaN' -> Left . IEEENaN $ tyConOf @a
+    IEEEInfinity' -> Left . IEEEInfinity $ tyConOf @a
+    IEEETooSmall' -> Left . IEEETooSmall $ tyConOf @a
+    IEEETooBig' -> Left . IEEETooBig $ tyConOf @a
+    TextCouldNotParse' -> Left . TextCouldNotParse $ tyConOf @a
+    LenientParse (L v') -> Right v'
+    StrictParse (L v') -> Right v'
+
 -- Helpers
+
+tyConOf :: forall (a :: Type) .
+  (Typeable a) => TyCon
+tyConOf = typeRepTyCon (typeRep @a)
 
 typeName :: forall (a :: Type) .
   (Typeable a) => Text
 typeName = pack . tyConName . typeRepTyCon $ (typeRep @a)
 
-handleNullOrMismatch :: forall (a :: Type) (l :: Leniency) .
-  (Typeable a) =>
-  MySQLValue -> FromFieldResult l a
+handleNullOrMismatch :: MySQLValue -> FromFieldResult l a
 handleNullOrMismatch = \case
-  MySQLNull -> UnexpectedNull (typeName @a)
-  _ -> TypeMismatch (typeName @a)
+  MySQLNull -> UnexpectedNull'
+  _ -> TypeMismatch'
 
 relax :: FromFieldResult 'Strict a -> FromFieldResult 'Lenient a
 relax = \case
-  UnexpectedNull t -> UnexpectedNull t
-  TypeMismatch t -> TypeMismatch t
-  Won'tFit t -> Won'tFit t
+  UnexpectedNull' -> UnexpectedNull'
+  TypeMismatch' -> TypeMismatch'
+  Won'tFit' -> Won'tFit'
   StrictParse x -> StrictParse x
 
-tryScientific :: forall (a :: Type) .
-  (Typeable a, Integral a, Bounded a) =>
+tryScientific :: (Integral a, Bounded a) =>
   Scientific -> FromFieldResult 'Strict a
-tryScientific = maybe (Won'tFit (typeName @a)) StrictParse . toBoundedInteger
+tryScientific = maybe Won'tFit' StrictParse . toBoundedInteger
 
 tryText :: (Read a) => Text -> FromFieldResult 'Lenient a
-tryText = maybe TextCouldNotParse LenientParse . readMaybe . unpack
+tryText = maybe TextCouldNotParse' LenientParse . readMaybe . unpack
 
 tryIEEE :: forall (b :: Type) (a :: Type) .
   (RealFloat a, Integral b, Bounded b) =>
   a -> FromFieldResult 'Lenient b
 tryIEEE v
-  | isNaN v = IEEENaN
-  | isInfinite v = IEEEInfinity
-  | v < fromIntegral (minBound @b) = IEEETooSmall
-  | v > fromIntegral (minBound @b) = IEEETooBig
+  | isNaN v = IEEENaN'
+  | isInfinite v = IEEEInfinity'
+  | v < fromIntegral (minBound @b) = IEEETooSmall'
+  | v > fromIntegral (minBound @b) = IEEETooBig'
   | otherwise = LenientParse . truncate $ v
 
-tryFixed :: forall (b :: Type) (a :: Type) .
-  (Typeable b, Integral a, Integral b, Bits a, Bits b) =>
+tryFixed :: (Integral a, Integral b, Bits a, Bits b) =>
   a -> FromFieldResult 'Strict b
-tryFixed = maybe (Won'tFit (typeName @b)) StrictParse . toIntegralSized
+tryFixed = maybe Won'tFit' StrictParse . toIntegralSized
 
 tryIEEEFromText :: (Read a, RealFloat a) =>
   Text -> FromFieldResult 'Lenient a
@@ -434,9 +477,9 @@ tryIEEEFromText = \case
   "Infinity" -> LenientParse . read $ "Infinity"
   "-Infinity" -> LenientParse . read $ "-Infinity"
   t -> case readMaybe . unpack $ t of
-    Nothing -> TextCouldNotParse
+    Nothing -> TextCouldNotParse'
     Just v -> if isInfinite v
               then case signum v of
-                -1 -> IEEETooSmall
-                _  -> IEEETooBig
+                -1 -> IEEETooSmall'
+                _  -> IEEETooBig'
               else LenientParse v
