@@ -3,12 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
 
-module Database.Beam.MySQL.Connection (
-  MySQL (..),
-  MySQLM (..),
-  ColumnDecodeError (..),
-  runBeamMySQL, runBeamMySQLDebug, -- runInsertRowReturning
-  ) where
+module Database.Beam.MySQL.Connection where
 
 import           Control.Exception.Safe (Exception, MonadCatch, MonadMask,
                                          MonadThrow, bracket, throw)
@@ -26,7 +21,7 @@ import           Data.HashSet (HashSet)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
 import           Data.Scientific (Scientific)
-import           Data.Text (Text)
+import           Data.Text (Text, pack)
 import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
 import           Data.Vector (Vector)
 import qualified Data.Vector as V
@@ -209,11 +204,63 @@ instance HasSqlEqualityCheck MySQL NominalDiffTime
 instance HasSqlQuantifiedEqualityCheck MySQL NominalDiffTime
 
 data ColumnDecodeError =
-  UnexpectedNullError {
+  FoundUnexpectedNull {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
     columnIndex    :: {-# UNPACK #-} !Word
+    } |
+  Can'tDecodeIntoDemanded {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word,
+    value          :: {-# UNPACK #-} !Text
+    } |
+  ValueWon'tFitIntoType {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word,
+    value          :: {-# UNPACK #-} !Text
+    } |
+  LenientUnexpectedNaN {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word
+    } |
+  LenientUnexpectedInfinity {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word,
+    value          :: {-# UNPACK #-} !Text
+    } |
+  LenientTooSmallToFit {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word,
+    value          :: {-# UNPACK #-} !Text
+    } |
+  LenientTooBigToFit {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word,
+    value          :: {-# UNPACK #-} !Text
+    } |
+  LenientTextCouldn'tParse {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word,
+    value          :: {-# UNPACK #-} !Text
+    } |
+  DemandedTooManyFields {
+    fieldsAvailable :: {-# UNPACK #-} !Word,
+    fieldsDemanded  :: {-# UNPACK #-} !Word
     }
   deriving stock (Eq, Show)
 
@@ -336,10 +383,29 @@ toDecodeError ::
   ColumnDecodeError
 toDecodeError tables v ix = \case
   UnexpectedNull t ->
-    UnexpectedNullError t ft tables (fromIntegral ix)
+    FoundUnexpectedNull t ft tables (fromIntegral ix)
+  TypeMismatch t ->
+    Can'tDecodeIntoDemanded t ft tables (fromIntegral ix) valRep
+  Won'tFit t ->
+    ValueWon'tFitIntoType t ft tables (fromIntegral ix) valRep
+  IEEENaN t ->
+    LenientUnexpectedNaN t ft tables (fromIntegral ix)
+  IEEEInfinity t ->
+    LenientUnexpectedInfinity t ft tables (fromIntegral ix) valRep
+  IEEETooSmall t ->
+    LenientTooSmallToFit t ft tables (fromIntegral ix) valRep
+  IEEETooBig t ->
+    LenientTooBigToFit t ft tables (fromIntegral ix) valRep
+  TextCouldNotParse t ->
+    LenientTextCouldn'tParse t ft tables (fromIntegral ix) valRep
+  RowExhausted ->
+    DemandedTooManyFields (fromIntegral . V.length $ v) (fromIntegral ix + 1)
+  BeamInternal -> error "Leak from beam internals!"
   where
     ft :: Text
     ft = toSQLTypeName . fst $ v V.! ix
+    valRep :: Text
+    valRep = pack . show . snd $ v V.! ix
 
 -- Decoding from a row is complex enough to warrant its own operators and an
 -- explicit stack.
@@ -347,12 +413,12 @@ toDecodeError tables v ix = \case
 data DecodeError =
   UnexpectedNull {-# UNPACK #-} !Text |
   TypeMismatch {-# UNPACK #-} !Text |
-  Won'tFit |
-  IEEENaN |
-  IEEEInfinity |
-  IEEETooSmall |
-  IEEETooBig |
-  TextCouldNotParse |
+  Won'tFit {-# UNPACK #-} !Text |
+  IEEENaN {-# UNPACK #-} !Text |
+  IEEEInfinity {-# UNPACK #-} !Text |
+  IEEETooSmall {-# UNPACK #-} !Text |
+  IEEETooBig {-# UNPACK #-} !Text |
+  TextCouldNotParse {-# UNPACK #-} !Text |
   RowExhausted |
   BeamInternal -- This shouldn't ever appear.
   deriving stock (Eq, Show)
@@ -393,9 +459,9 @@ decodeFromRow = \case
       Nothing        -> throwError RowExhausted
       -- TODO: Seems like field types are unnecessary. - Koz
       Just (_, val) -> case fromField val of
-        FromField.UnexpectedNull t -> throwError (UnexpectedNull t)
-        FromField.TypeMismatch t   -> throwError (TypeMismatch t)
-        FromField.Won'tFit         -> throwError Won'tFit
+        FromField.UnexpectedNull t -> throwError . UnexpectedNull $ t
+        FromField.TypeMismatch t   -> throwError . TypeMismatch $ t
+        FromField.Won'tFit t       -> throwError . Won'tFit $ t
         FromField.StrictParse x    -> advanceIndex >> callback x
         {-
          - TODO: Write a version of this for lenient parsing. - Koz

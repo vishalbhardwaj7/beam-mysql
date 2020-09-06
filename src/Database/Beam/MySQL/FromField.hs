@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes    #-}
 {-# LANGUAGE DataKinds              #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs                  #-}
@@ -29,7 +30,7 @@ data Leniency = Lenient | Strict
 data FromFieldResult (l :: Leniency) (a :: Type) where
   UnexpectedNull :: {-# UNPACK #-} !Text -> FromFieldResult l a
   TypeMismatch :: {-# UNPACK #-} !Text -> FromFieldResult l a
-  Won'tFit :: FromFieldResult l a
+  Won'tFit :: {-# UNPACK #-} !Text -> FromFieldResult l a
   IEEENaN :: FromFieldResult 'Lenient a
   IEEEInfinity :: FromFieldResult 'Lenient a
   IEEETooSmall :: FromFieldResult 'Lenient a
@@ -386,26 +387,28 @@ instance FromField 'Lenient (L NominalDiffTime) where
 
 -- Helpers
 
+typeName :: forall (a :: Type) .
+  (Typeable a) => Text
+typeName = pack . tyConName . typeRepTyCon $ (typeRep @a)
+
 handleNullOrMismatch :: forall (a :: Type) (l :: Leniency) .
   (Typeable a) =>
   MySQLValue -> FromFieldResult l a
 handleNullOrMismatch = \case
-  MySQLNull -> UnexpectedNull typeName
-  _ -> TypeMismatch typeName
-  where
-    typeName :: Text
-    typeName = pack . tyConName . typeRepTyCon $ (typeRep @a)
+  MySQLNull -> UnexpectedNull (typeName @a)
+  _ -> TypeMismatch (typeName @a)
 
 relax :: FromFieldResult 'Strict a -> FromFieldResult 'Lenient a
 relax = \case
   UnexpectedNull t -> UnexpectedNull t
   TypeMismatch t -> TypeMismatch t
-  Won'tFit -> Won'tFit
+  Won'tFit t -> Won'tFit t
   StrictParse x -> StrictParse x
 
-tryScientific :: (Integral a, Bounded a) =>
+tryScientific :: forall (a :: Type) .
+  (Typeable a, Integral a, Bounded a) =>
   Scientific -> FromFieldResult 'Strict a
-tryScientific = maybe Won'tFit StrictParse . toBoundedInteger
+tryScientific = maybe (Won'tFit (typeName @a)) StrictParse . toBoundedInteger
 
 tryText :: (Read a) => Text -> FromFieldResult 'Lenient a
 tryText = maybe TextCouldNotParse LenientParse . readMaybe . unpack
@@ -420,9 +423,10 @@ tryIEEE v
   | v > fromIntegral (minBound @b) = IEEETooBig
   | otherwise = LenientParse . truncate $ v
 
-tryFixed :: (Integral a, Integral b, Bits a, Bits b) =>
+tryFixed :: forall (b :: Type) (a :: Type) .
+  (Typeable b, Integral a, Integral b, Bits a, Bits b) =>
   a -> FromFieldResult 'Strict b
-tryFixed = maybe Won'tFit StrictParse . toIntegralSized
+tryFixed = maybe (Won'tFit (typeName @b)) StrictParse . toIntegralSized
 
 tryIEEEFromText :: (Read a, RealFloat a) =>
   Text -> FromFieldResult 'Lenient a

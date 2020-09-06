@@ -1,11 +1,40 @@
 {-# LANGUAGE KindSignatures      #-}
+{-# LANGUAGE MonoLocalBinds      #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Database.Beam.MySQL.Extra where
 
+import           Control.Exception.Safe (bracket)
+import           Control.Monad (void)
+import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.Reader (ask)
+import           Data.Foldable (fold)
+import           Data.Functor.Identity (Identity)
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HM
 import           Data.Kind (Type)
-import           Database.Beam (FromBackendRow)
-import           Database.Beam.MySQL.Connection (MySQL)
+import           Data.List (intersperse)
+import           Data.Text (Text)
+import           Data.Text.Lazy (fromStrict)
+import           Data.Text.Lazy.Encoding (encodeUtf8)
+import           Data.Vector (Vector)
+import qualified Data.Vector as V
+import           Database.Beam (FromBackendRow, runSelectReturningOne)
+import           Database.Beam.Backend.SQL (insertCmd)
+import           Database.Beam.MySQL.Connection (MySQL, MySQLM (MySQLM), MySQLMEnv (DebugEnv, ReleaseEnv),
+                                                 acquireStream, drainStream)
+import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (Insert), MysqlInsertValuesSyntax (FromExprs, FromSQL),
+                                             MysqlSyntax,
+                                             MysqlTableNameSyntax (MysqlTableNameSyntax),
+                                             backtickWrap, defaultE, intoQuery,
+                                             intoTableName, textSyntax)
+import           Database.Beam.Query (SqlInsert (SqlInsert, SqlInsertNoRows),
+                                      SqlSelect (SqlSelect))
+import           Database.MySQL.Base (MySQLConn, MySQLValue (MySQLText),
+                                      Query (Query), execute_, okAffectedRows)
+import           Prelude hiding (map, read)
+import           System.IO.Streams (read)
+import           System.IO.Streams.Combinators (foldM, map)
 
 runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
   (FromBackendRow MySQL (table Identity)) =>
@@ -15,15 +44,18 @@ runInsertRowReturning = \case
   SqlInsert _ ins@(Insert tableName fields values) -> case values of
     FromSQL _ -> fail "Not implemented for INSERT INTO ... SELECT ..."
     FromExprs [] -> pure Nothing -- should be impossible
-    FromExprs [expr] -> handle (rethrowBeamRowError (tblNameSet tableName)) $ do
+    FromExprs [expr] -> do
       let fieldVals = HM.fromList . zip fields $ expr
       -- get primary key and what values would change there
       let pkStatement = buildPkQuery tableName
-      (_, conn) <- MySQLM ask
+      conn <- (\case DebugEnv _ c -> c
+                     ReleaseEnv c -> c) <$>MySQLM ask
       pkColVals <-
         bracket (acquireStream conn pkStatement)
                 drainStream
-                (liftIO . \(_, stream) -> foldM (go fieldVals) HM.empty stream)
+                (\stream -> liftIO (map (V.map snd) stream >>=
+                              foldM (go fieldVals) HM.empty))
+                -- (liftIO . \(_, stream) -> foldM (go fieldVals) HM.empty stream)
       let MysqlTableNameSyntax _ nameOfTable = tableName
       -- This assumes _one_ auto-increment column. What if there are several?
       -- TODO: Determine proper semantics for this. - Koz
@@ -90,7 +122,7 @@ runInsertRowReturning = \case
         ";"
       fromPair :: (Text, MysqlSyntax) -> MysqlSyntax
       fromPair (colName, val) = textSyntax colName <> " = " <> val
-      collectAutoIncrementCol :: MySQLConn -> Text - MySQLM (Maybe Text)
+      collectAutoIncrementCol :: MySQLConn -> Text -> MySQLM (Maybe Text)
       collectAutoIncrementCol conn nameOfTable = do
         let autoIncQuery = Query (
               "SELECT `column_name` " <>
@@ -102,11 +134,11 @@ runInsertRowReturning = \case
               )
         bracket (acquireStream conn autoIncQuery)
                 drainStream
-                (liftIO . \(_, stream) -> do
+                (\stream -> liftIO $ do
                     res <- read stream
                     case (V.!? 0) =<< res of
-                      Just (MySQLText autoincCol) -> pure . Just $ autoincCol
-                      _                           -> pure Nothing)
+                      Just (_, MySQLText aic) -> pure . Just $ aic
+                      _                       -> pure Nothing)
       insertReturningWithoutAutoinc ::
         MySQLConn ->
         HashMap Text MysqlSyntax ->
@@ -122,6 +154,3 @@ runInsertRowReturning = \case
         if pkName == autoincCol && pkValue == defaultE
         then "last_insert_id()"
         else pkValue
-      tblNameSet :: MysqlTableNameSyntax -> HashSet Text
-      tblNameSet (MysqlTableNameSyntax _ nameOfTable) =
-        HS.singleton nameOfTable
