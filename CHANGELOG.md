@@ -6,6 +6,7 @@
 * Added support for a lenient mode (see LENIENT.md)
 * Reintroduce `runInsertRowReturning`
 * Improve error messages
+* Rewrite benchmarks using gauge
 
 ## 1.0.0.0
 
