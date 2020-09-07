@@ -70,14 +70,14 @@ listed as demandable in 'strict' mode is also available in 'lenient' mode.
 |``ENUM``         |``Text``, ``ByteString``     |``Int{8,16,32,64}``, ``Int``, ``Float``, ``Double``|
 |``SET``          |``Text``, ``ByteString``     |``Int{8,16,32,64}``, ``Int``, ``Float``, ``Double``|
 |-----------------|----------------------------------------------------------|-------------------------------|
-|``TINYINT``      |``Int{8,16,32,64}``, ``Int``, ``Rational``, ``Scientific``|``Text``, ``Float``, ``Double``|
-|``SMALLINT``     |``Int{16,32,64}``, ``Int``, ``Rational``, ``Scientific``  |``Text``, ``Float``, ``Double``|
-|``MEDIUMINT``    |``Int{16,32,64}``, ``Int``, ``Rational``, ``Scientific``  |``Text``, ``Float``, ``Double``|
-|``INT``          |``Int{32,64}``, ``Int``, ``Rational``, ``Scientific``     |``Text``, ``Float``, ``Double``|
-|``BIGINT``       |``Int64``, ``Int``, ``Rational``, ``Scientific``          |``Text``, ``Float``, ``Double``|
+|``TINYINT``      |``Int{8,16,32,64}``, ``Int``, ``Rational``, ``Scientific``|``Text``|
+|``SMALLINT``     |``Int{16,32,64}``, ``Int``, ``Rational``, ``Scientific``  |``Text``|
+|``MEDIUMINT``    |``Int{16,32,64}``, ``Int``, ``Rational``, ``Scientific``  |``Text``|
+|``INT``          |``Int{32,64}``, ``Int``, ``Rational``, ``Scientific``     |``Text``|
+|``BIGINT``       |``Int64``, ``Int``, ``Rational``, ``Scientific``          |``Text``|
 |-----------------|---------------------|--------|
-|``FLOAT``        |``Float``, ``Double``|``Text``|
-|``DOUBLE``       |``Double``           |``Text``|
+|``FLOAT``        |``Float``, ``Double``|``Text, Int8, Int16, Int32, Int64``|
+|``DOUBLE``       |``Double``           |``Text, Int8, Int16, Int32, Int64``|
 
 ## Textual types
 
@@ -98,7 +98,6 @@ and ``Scientific`` are always demandable. In 'lenient' mode, the following are
 also demandable:
 
 * ``Text``, as the value's textual representation in base-10.
-* ``Float`` and ``Double``, as the IEEE-754 textual approximation of the value.
 
 ## Fixed-width floating-point types
 
@@ -107,3 +106,5 @@ In 'strict' mode, only ``Double`` is demandable from ``DOUBLE``, and both
 following are also demandable: 
 
 * ``Text``, as the IEEE-754 textual approximation of the value.
+* Fixed-width signed integral types, as a truncation of the value, provided it
+  'fits' into the representation.

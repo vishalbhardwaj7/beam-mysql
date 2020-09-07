@@ -152,6 +152,15 @@ test-suite escaping-dsl
   if flag(lenient)
     buildable: False
 
+test-suite leniency
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/leniency
+
+  if !flag(lenient)
+    buildable: False
+
 -- Benchmarks
 
 benchmark insert

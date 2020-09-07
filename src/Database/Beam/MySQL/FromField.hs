@@ -464,7 +464,7 @@ tryIEEE v
   | isNaN v = IEEENaN'
   | isInfinite v = IEEEInfinity'
   | v < fromIntegral (minBound @b) = IEEETooSmall'
-  | v > fromIntegral (minBound @b) = IEEETooBig'
+  | v > fromIntegral (maxBound @b) = IEEETooBig'
   | otherwise = LenientParse . truncate $ v
 
 tryFixed :: (Integral a, Integral b, Bits a, Bits b) =>
