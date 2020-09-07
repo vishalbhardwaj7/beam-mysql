@@ -58,7 +58,7 @@ import           Database.Beam.Backend.SQL (HasSqlValueSyntax (..), IsSql92Aggre
                                             IsSql92UpdateSyntax (..),
                                             IsSql99ConcatExpressionSyntax (..),
                                             SqlNull (..))
-import           Database.MySQL.Base (Query (..), fromQuery)
+import           Database.MySQL.Base (Query (..))
 import           Database.MySQL.Protocol.Escape (escapeText)
 import           Fmt (build, unlinesF, whenF, (+|), (|+))
 
