@@ -7,6 +7,7 @@
 * Reintroduce `runInsertRowReturning`
 * Improve error messages
 * Rewrite benchmarks using gauge
+* Ensure proper escaping of `Text` values
 
 ## 1.0.0.0
 

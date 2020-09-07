@@ -145,6 +145,14 @@ test-suite escaping-dsl
     , typed-process    ^>=0.2.6.0
     , unix             ^>=2.7.2.2
 
+test-suite text-escaping
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/text-escaping
+
+test-suite bad-schemata
+  import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
   hs-source-dirs: test/bad-schemata
