@@ -10,16 +10,16 @@ import           Data.Functor.Identity (Identity)
 import qualified Data.HashSet as HS
 import           Data.Int (Int64)
 import           Data.Kind (Type)
-import           Data.Text (Text, pack)
+import           Data.Text (Text)
 import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 SqlSelect, Table (PrimaryKey, primaryKey),
                                 TableEntity, all_, defaultDbSettings,
                                 runSelectReturningOne, select)
-import           Database.Beam.Backend.SQL.Row (ColumnParseError (ColumnTypeMismatch),
-                                                FromBackendRow, brreColumn,
-                                                brreError)
-import           Database.Beam.MySQL (ColumnDecodeError, MySQL, errorType,
-                                      runBeamMySQL, tableNames)
+import           Database.Beam.Backend.SQL.Row (FromBackendRow)
+import           Database.Beam.MySQL (ColumnDecodeError (Can'tDecodeIntoDemanded),
+                                      MySQL, columnIndex, demandedType,
+                                      runBeamMySQL, sqlType, tablesInvolved,
+                                      value)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
 import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
@@ -61,51 +61,35 @@ spec :: (ColumnDecodeError, ColumnDecodeError) -> Spec
 spec (errSmall, errBig) = do
   describe "Errors on mistyped fields (simple)" $ do
     it "should contain the name of the table" $
-      (HS.member "test_table" . tableNames $ errSmall) `shouldBe` True
+      (HS.member "test_table" . tablesInvolved $ errSmall) `shouldBe` True
     it "should indicate the right column" $
-      (brreColumn . errorType $ errSmall) `shouldBe` Just 1
+      columnIndex errSmall `shouldBe` 1
     it "should say we have a type mismatch" $
-      (isColumnTypeMismatch . brreError . errorType $ errSmall) `shouldBe` True
+      isCan'tDecode errSmall `shouldBe` True
     it "should state the expected type correctly" $
-      (expectedType . brreError . errorType $ errSmall) `shouldBe` Just "Text"
+      demandedType errSmall `shouldBe` "Text"
     it "should state the actual (SQL) type correctly" $
-      (sqlType . brreError . errorType $ errSmall) `shouldBe`
-        Just "MySQL LongLong"
+      sqlType errSmall `shouldBe` "MySQL LongLong"
     it "should report the value found" $
-      (valueFound . brreError . errorType $ errSmall) `shouldBe`
-        Just "Value found: MySQLInt64 2"
+      value errSmall `shouldBe` "MySQLInt64 2"
   describe "Errors on mistyped fields (complex)" $ do
     it "should contain the name of the table" $
-      (HS.member "bigtest_table" . tableNames $ errBig) `shouldBe` True
+      (HS.member "bigtest_table" . tablesInvolved $ errBig) `shouldBe` True
     it "should indicate the right column" $
-      (brreColumn . errorType $ errBig) `shouldBe` Just 2
+      columnIndex errBig `shouldBe` 2
     it "should say we have a type mismatch" $
-      (isColumnTypeMismatch . brreError . errorType $ errBig) `shouldBe` True
+      isCan'tDecode errBig `shouldBe` True
     it "should state the expected type correctly" $
-      (expectedType . brreError . errorType $ errBig) `shouldBe` Just "Int64"
+      demandedType errBig `shouldBe` "Int64"
     it "should state the actual (SQL) type correctly" $
-      (sqlType . brreError . errorType $ errBig) `shouldBe`
-        Just "MySQL VarString"
+      sqlType errBig `shouldBe` "MySQL VarString"
     it "should report the value found" $
-      (valueFound . brreError . errorType $ errBig) `shouldBe`
-        Just "Value found: MySQLText \"bar\""
+      value errBig `shouldBe` "MySQLText \"bar\""
   where
-    isColumnTypeMismatch :: ColumnParseError -> Bool
-    isColumnTypeMismatch = \case
-      ColumnTypeMismatch{} -> True
+    isCan'tDecode :: ColumnDecodeError -> Bool
+    isCan'tDecode = \case
+      Can'tDecodeIntoDemanded{} -> True
       _ -> False
-    expectedType :: ColumnParseError -> Maybe Text
-    expectedType = \case
-      ColumnTypeMismatch t _ _ -> pure . pack $ t
-      _ -> Nothing
-    sqlType :: ColumnParseError -> Maybe Text
-    sqlType = \case
-      ColumnTypeMismatch _ t _ -> pure . pack $ t
-      _ -> Nothing
-    valueFound :: ColumnParseError -> Maybe Text
-    valueFound = \case
-      ColumnTypeMismatch _ _ t -> pure . pack $ t
-      _ -> Nothing
 
 data TestT (f :: Type -> Type) = TestT
   {

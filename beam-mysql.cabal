@@ -147,7 +147,12 @@ test-suite escaping-dsl
 
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  hs-source-dirs: test/escaping-dsl
+  hs-source-dirs: test/bad-schemata
+
+  if flag(lenient)
+    buildable: False
+
+-- Benchmarks
 
 benchmark insert
   import:         common-bench
