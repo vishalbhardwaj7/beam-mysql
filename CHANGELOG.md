@@ -8,6 +8,8 @@
 * Improve error messages
 * Rewrite benchmarks using gauge
 * Ensure proper escaping of `Text` values
+* Add `dumpInsertSQL`, `dumpSelectSQL`, `dumpDeleteSQL`, `dumpUpdateSQL` for 
+  debugging SQL query generator output
 
 ## 1.0.0.0
 

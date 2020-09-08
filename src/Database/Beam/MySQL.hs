@@ -3,7 +3,8 @@ module Database.Beam.MySQL
   MySQL, MySQLM,
   runInsertRowReturning,
   ColumnDecodeError (..),
-  runBeamMySQL, runBeamMySQLDebug
+  runBeamMySQL, runBeamMySQLDebug,
+  dumpInsertSQL, dumpSelectSQL, dumpUpdateSQL, dumpDeleteSQL
 ) where
 
 import           Database.Beam.MySQL.Connection

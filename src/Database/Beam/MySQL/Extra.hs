@@ -15,26 +15,49 @@ import qualified Data.HashMap.Strict as HM
 import           Data.Kind (Type)
 import           Data.List (intersperse)
 import           Data.Text (Text)
-import           Data.Text.Lazy (fromStrict)
+import           Data.Text.Lazy (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (encodeUtf8)
 import           Data.Vector (Vector)
 import qualified Data.Vector as V
 import           Database.Beam (FromBackendRow, runSelectReturningOne)
-import           Database.Beam.Backend.SQL (insertCmd)
+import           Database.Beam.Backend.SQL (insertCmd, updateCmd)
 import           Database.Beam.MySQL.Connection (MySQL, MySQLM (MySQLM), MySQLMEnv (DebugEnv, ReleaseEnv),
                                                  acquireStream, drainStream)
 import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (Insert), MysqlInsertValuesSyntax (FromExprs, FromSQL),
                                              MysqlSyntax,
                                              MysqlTableNameSyntax (MysqlTableNameSyntax),
-                                             backtickWrap, defaultE, intoQuery,
+                                             backtickWrap, defaultE,
+                                             intoLazyText, intoQuery,
                                              intoTableName, textSyntax)
-import           Database.Beam.Query (SqlInsert (SqlInsert, SqlInsertNoRows),
-                                      SqlSelect (SqlSelect))
+import           Database.Beam.Query (SqlDelete (SqlDelete),
+                                      SqlInsert (SqlInsert, SqlInsertNoRows),
+                                      SqlSelect (SqlSelect),
+                                      SqlUpdate (SqlIdentityUpdate, SqlUpdate))
 import           Database.MySQL.Base (MySQLConn, MySQLValue (MySQLText),
                                       Query (Query), execute_, okAffectedRows)
 import           Prelude hiding (map, read)
 import           System.IO.Streams (read)
 import           System.IO.Streams.Combinators (foldM, map)
+
+dumpInsertSQL :: forall (table :: (Type -> Type) -> Type) .
+  SqlInsert MySQL table -> Maybe Text
+dumpInsertSQL = \case
+  SqlInsertNoRows -> Nothing
+  SqlInsert _ ins -> Just . toStrict . intoLazyText . insertCmd $ ins
+
+dumpSelectSQL :: forall (a :: Type) .
+  SqlSelect MySQL a -> Text
+dumpSelectSQL (SqlSelect sel) = toStrict . intoLazyText $ sel
+
+dumpUpdateSQL :: forall (table :: (Type -> Type) -> Type) .
+  SqlUpdate MySQL table -> Maybe Text
+dumpUpdateSQL = \case
+  SqlIdentityUpdate -> Nothing
+  SqlUpdate _ upd -> Just . toStrict . intoLazyText . updateCmd $ upd
+
+dumpDeleteSQL :: forall (table :: (Type -> Type) -> Type) .
+  SqlDelete MySQL table -> Text
+dumpDeleteSQL (SqlDelete _ del) = toStrict . intoLazyText $ del
 
 runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
   (FromBackendRow MySQL (table Identity)) =>
