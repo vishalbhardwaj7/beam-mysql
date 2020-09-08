@@ -249,11 +249,11 @@ instance HasSqlValueSyntax MysqlSyntax Integer where
 
 instance HasSqlValueSyntax MysqlSyntax String where
   sqlValueSyntax =
-    MysqlSyntax . (HS.empty,) . quoteWrap . fromString
+    MysqlSyntax . (HS.empty,) . quoteWrap . escapeText . fromString
 
 instance HasSqlValueSyntax MysqlSyntax TL.Text where
   sqlValueSyntax =
-    MysqlSyntax . (HS.empty,) . quoteWrap . fromLazyText
+    MysqlSyntax . (HS.empty,) . quoteWrap . escapeText . fromLazyText
 
 -- Syntax defs
 
