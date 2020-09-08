@@ -113,3 +113,9 @@ executable beam-insert-row-returning-bench
     TmpMySQL
 
   hs-source-dirs: bench bench/beam-insert-row-returning
+
+test-suite text-escaping
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/text-escaping
