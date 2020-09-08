@@ -293,7 +293,6 @@ instance MonadBeam MySQL MySQLM where
   {-# INLINABLE runNoReturn #-}
   runNoReturn sql@(MysqlSyntax (_, _)) = do
     (statement, conn) <- processAndLog sql
-    -- TODO: Error capture. - Koz
     void . liftIO . execute_ conn $ statement
   {-# INLINABLE runReturningOne #-}
   runReturningOne sql@(MysqlSyntax (tables, _)) = do
@@ -322,8 +321,6 @@ runBeamMySQL conn (MySQLM comp) = runReaderT comp . ReleaseEnv $ conn
 runBeamMySQLDebug :: (Text -> IO ()) -> MySQLConn -> MySQLM a -> IO a
 runBeamMySQLDebug dbg conn (MySQLM comp) =
   runReaderT comp . DebugEnv dbg $ conn
-
--- TODO: runInsertRowReturning. - Koz
 
 -- Helpers
 

@@ -50,4 +50,4 @@ toSQLTypeName ft = "MySQL " <>
      | ft == mySQLTypeBlob -> "Blob"
      | ft == mySQLTypeVarString -> "VarString"
      | ft == mySQLTypeString -> "String"
-     | otherwise -> "Geometry" -- TODO: This is brittle. - Koz
+     | otherwise -> "Geometry"

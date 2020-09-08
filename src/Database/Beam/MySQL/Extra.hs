@@ -80,11 +80,9 @@ runInsertRowReturning = \case
                               foldM (go fieldVals) HM.empty))
                 -- (liftIO . \(_, stream) -> foldM (go fieldVals) HM.empty stream)
       let MysqlTableNameSyntax _ nameOfTable = tableName
-      -- This assumes _one_ auto-increment column. What if there are several?
-      -- TODO: Determine proper semantics for this. - Koz
       mAutoincCol <- collectAutoIncrementCol conn nameOfTable
       case mAutoincCol of
-        -- No autoincrementing column(s), so primary key is enough to select
+        -- No autoincrementing column, so primary key is enough to select
         -- changed rows.
         Nothing         -> insertReturningWithoutAutoinc conn pkColVals
         Just autoincCol -> case HM.lookup autoincCol pkColVals of
@@ -95,9 +93,6 @@ runInsertRowReturning = \case
             let insertStatement = insertCmd ins
             void . liftIO . execute_ conn . intoQuery $ insertStatement
             -- This is a gory hack.
-            -- TODO: Is there a better (or indeed, _any_ other) way to figure
-            -- out if an autoincrementing field is set to some value, or
-            -- DEFAULT, for example?
             let newPKs = HM.mapWithKey (regraft autoincCol) pkColVals
             selectByPrimaryKeyCols newPKs
     _ -> fail "Cannot insert several rows with runInsertRowReturning"
@@ -121,11 +116,6 @@ runInsertRowReturning = \case
       extractColName v = case V.head v of
         MySQLText t -> pure t
         _           -> fail "Column name was not text"
-      -- Select inserted rows by primary keys
-      -- Result can be totally wrong if the values are not constant
-      -- expressions.
-      --
-      -- TODO: Tagging of non-constants to block their evaluation. - Koz
       selectByPrimaryKeyCols ::
         HashMap Text MysqlSyntax -> MySQLM (Maybe (table Identity))
       selectByPrimaryKeyCols pkColVals = do

@@ -361,7 +361,7 @@ instance FromField 'Strict TimeOfDay where
     MySQLTime s v ->
       if s == zeroBits
       then StrictParse v
-      else TypeMismatch' -- TODO: More informative error. - Koz
+      else TypeMismatch'
     v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L TimeOfDay) where
