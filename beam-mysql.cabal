@@ -51,6 +51,7 @@ common common-bench
   build-depends:
     , beam-core
     , beam-mysql
+    , hspec
     , bytestring
     , directory        ^>=1.3.6.0
     , filepath         ^>=1.4.2.1
@@ -105,6 +106,23 @@ executable beam-insert-bench
 
   hs-source-dirs: bench bench/beam-insert
 
+library mysql-temp
+  import:          common-lang
+  visibility:      private
+  exposed-modules: Database.MySQL.Temp
+  build-depends:
+    , directory      ^>=1.3.6.0
+    , filepath       ^>=1.4.2.1
+    , fmt
+    , random         ^>=1.1
+    , typed-process  ^>=0.2.6.0
+    , unix           ^>=2.7.2.2
+    , safe-exceptions
+    , mysql-haskell
+
+  hs-source-dirs:  temp-db
+
+
 executable beam-insert-row-returning-bench
   import:         common-bench
   main-is:        Main.hs
@@ -114,9 +132,28 @@ executable beam-insert-row-returning-bench
 
   hs-source-dirs: bench bench/beam-insert-row-returning
 
--- test-suite text-escaping
---   import:         common-test
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   hs-source-dirs: test/text-escaping
+common common-test
+  import:         common-lang
+  ghc-options:    -O2 -threaded -with-rtsopts=-N
+  build-depends:
+    , beam-core
+    , beam-mysql
+    , hspec               
+    , mysql-temp
+    , unordered-containers
+
+test-suite test-escaping-dsl
+  import:         common-test
+  build-depends:
+     directory      ^>=1.3.6.0
+    , filepath       ^>=1.4.2.1
+    , fmt
+    , random         ^>=1.1
+    , typed-process  ^>=0.2.6.0
+    , unix           ^>=2.7.2.2
+    , safe-exceptions
+    , mysql-haskell, text
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test
 
