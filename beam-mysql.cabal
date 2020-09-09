@@ -1,4 +1,4 @@
-cabal-version: 2.2
+cabal-version: 3.0
 name:          beam-mysql
 version:       1.0.0.2
 synopsis:      Connection layer between beam and MySQL/MariaDB
@@ -51,10 +51,10 @@ common common-bench
   build-depends:
     , beam-core
     , beam-mysql
-    , hspec
     , bytestring
     , directory        ^>=1.3.6.0
     , filepath         ^>=1.4.2.1
+    , hspec
     , mysql-haskell
     , random           ^>=1.1
     , safe-exceptions
@@ -111,17 +111,16 @@ library mysql-temp
   visibility:      private
   exposed-modules: Database.MySQL.Temp
   build-depends:
-    , directory      ^>=1.3.6.0
-    , filepath       ^>=1.4.2.1
+    , directory        ^>=1.3.6.0
+    , filepath         ^>=1.4.2.1
     , fmt
-    , random         ^>=1.1
-    , typed-process  ^>=0.2.6.0
-    , unix           ^>=2.7.2.2
-    , safe-exceptions
     , mysql-haskell
+    , random           ^>=1.1
+    , safe-exceptions
+    , typed-process    ^>=0.2.6.0
+    , unix             ^>=2.7.2.2
 
   hs-source-dirs:  temp-db
-
 
 executable beam-insert-row-returning-bench
   import:         common-bench
@@ -133,29 +132,29 @@ executable beam-insert-row-returning-bench
   hs-source-dirs: bench bench/beam-insert-row-returning
 
 common common-test
-  import:         common-lang
-  ghc-options:    -O2 -threaded -with-rtsopts=-N
+  import:        common-lang
+  ghc-options:   -O2 -threaded -with-rtsopts=-N
   build-depends:
     , beam-core
     , beam-mysql
-    , hspec               
+    , hspec
     , mysql-temp
     , unordered-containers
 
 test-suite test-escaping-dsl
   import:         common-test
   build-depends:
-     directory      ^>=1.3.6.0
-    , filepath       ^>=1.4.2.1
-    , fmt
-    , random         ^>=1.1
-    , typed-process  ^>=0.2.6.0
-    , unix           ^>=2.7.2.2
-    , safe-exceptions
-    , mysql-haskell
-    , text
     , bytestring
+    , directory        ^>=1.3.6.0
+    , filepath         ^>=1.4.2.1
+    , fmt
+    , mysql-haskell
+    , random           ^>=1.1
+    , safe-exceptions
+    , text
+    , typed-process    ^>=0.2.6.0
+    , unix             ^>=2.7.2.2
+
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
   hs-source-dirs: test
-
