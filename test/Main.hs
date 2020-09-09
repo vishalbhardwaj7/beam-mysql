@@ -5,28 +5,23 @@
 module Main (main) where
 
 import           Control.Exception.Safe (bracket)
+import qualified Data.ByteString.Lazy as BSL
 import           Data.Foldable (traverse_)
 import           Data.Functor.Identity (Identity)
-import           Data.Int (Int16, Int32, Int64, Int8)
+import           Data.Int (Int64)
 import           Data.Kind (Type)
 import           Data.Text (Text)
 import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 Table (PrimaryKey, primaryKey), TableEntity,
-                                defaultDbSettings, runSelectReturningOne)
+                                defaultDbSettings)
+import qualified Database.Beam as B
 import           Database.Beam.MySQL (MySQL, runBeamMySQL)
-import           Database.Beam.Query (SqlSelect, all_, select)
+import           Database.Beam.Query (SqlSelect, select)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
 import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
 import           GHC.Generics (Generic)
 import           Test.Hspec (Spec, describe, hspec, it, shouldBe)
-
-import           Data.ByteString as ByteString
-import qualified Data.Text.Lazy as TL
-
-import qualified Data.ByteString.Lazy as BSL
-
-import qualified Database.Beam as B
 
 main :: IO ()
 main = do

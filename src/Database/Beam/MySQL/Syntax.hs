@@ -9,7 +9,7 @@ module Database.Beam.MySQL.Syntax
   MysqlInsertValuesSyntax (..),
   MysqlInsertSyntax (..),
   intoQuery, intoDebugText, intoTableName, bracketWrap,
-  defaultE, backtickWrap, intoLazyText, textSyntax
+  defaultE, backtickWrap, intoLazyText, textSyntax, quoteWrapUnescaped
 ) where
 
 -- TODO: Use qualified imports
@@ -25,7 +25,6 @@ import           Data.List (intersperse)
 import           Data.Scientific (Scientific)
 import           Data.String (IsString, fromString)
 import           Data.Text (Text)
-import           Data.Text.Encoding (decodeUtf8)
 import qualified Data.Text.Lazy as TL
 import           Data.Text.Lazy.Builder (Builder, fromText, toLazyText)
 import           Data.Text.Lazy.Builder.Scientific (scientificBuilder)
@@ -233,7 +232,7 @@ instance HasSqlValueSyntax MysqlSyntax ByteString where
   -- TODO: It is *probably* correct to escape the bytestring, decode with
   --       latin1 and encode with latin1 to go from Text -> ByteString
   --       in `intoQuery`; disable for now
-  sqlValueSyntax = error "Dabase.Beam.MySQL: ByteString not supported" 
+  sqlValueSyntax = error "Dabase.Beam.MySQL: ByteString not supported"
   -- textSyntax . quoteWrapUnescaped . decodeUtf8 . Escape.escapeBytes
 
 -- SAFE: escaped
