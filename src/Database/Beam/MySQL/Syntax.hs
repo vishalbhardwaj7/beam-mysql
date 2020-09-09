@@ -80,19 +80,25 @@ intoDebugText (MysqlSyntax (tables, b)) =
   unlinesF tables |+
   ""
 
+-- SAFE: unwrap of safe values (by induction)
 intoLazyText :: MysqlSyntax -> TL.Text
 intoLazyText (MysqlSyntax (_, b)) = toLazyText b
 
+-- SAFE: Word -> Text
 charLen :: Maybe Word -> MysqlSyntax
 charLen =
   MysqlSyntax . (HS.empty,) . maybe "MAX" (fromString . show)
 
+-- POTENTIALLY UNSAFE:
+--   charset comes from `beam`, but what are these values and where do
+--   they come from?
 charSet :: Maybe Text -> MysqlSyntax
 charSet = MysqlSyntax . (HS.empty,) . foldMap go
   where
     go :: Text -> Builder
     go = (" CHARACTER SET " <>) . backtickWrap . fromText
 
+-- SAFE: Word -> Text
 numPrec :: Maybe (Word, Maybe Word) -> MysqlSyntax
 numPrec = \case
   Nothing -> mempty
@@ -100,6 +106,7 @@ numPrec = \case
     Nothing -> fromString . show $ d
     Just n  -> (fromString . show $ d) <> ", " <> (fromString . show $ n)
 
+-- SAFE iff inputs are safe
 textSyntax :: Text -> MysqlSyntax
 textSyntax = MysqlSyntax . (HS.empty,) . fromText
 
@@ -116,6 +123,7 @@ data MysqlTableNameSyntax = MysqlTableNameSyntax
   {-# UNPACK #-} !Text
   deriving stock (Eq)
 
+-- SAFE given that beam tables are statically defined
 intoTableName :: MysqlTableNameSyntax -> MysqlSyntax
 intoTableName (MysqlTableNameSyntax db name) =
   MysqlSyntax . (HS.singleton name,) $ foldMap go db <> fromText name
@@ -136,79 +144,115 @@ data MysqlInsertSyntax =
 
 -- How we convert everything types defined in FromField to MySQL syntax
 
+-- SAFE: constants
 instance HasSqlValueSyntax MysqlSyntax Bool where
   sqlValueSyntax = \case
     True -> "TRUE"
     False -> "FALSE"
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Int8 where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Int16 where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Int32 where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Int64 where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Int where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Word8 where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Word16 where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Word32 where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Word64 where
   sqlValueSyntax = fromString . show
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Word where
   sqlValueSyntax = fromString . show
 
+{- SAFE: escaped
+
+Notes: a plain `show` *should* be safe:
+
+  Prelude Numeric.IEEE> infinity :: Double
+  Infinity
+  Prelude Numeric.IEEE> nan :: Double
+  NaN
+
+However, escape to be sure
+-}
 instance HasSqlValueSyntax MysqlSyntax Float where
-  sqlValueSyntax = fromString . show
+  sqlValueSyntax = textSyntax . Escape.escapeText . fromString . show
 
+{- SAFE: escaped -}
 instance HasSqlValueSyntax MysqlSyntax Double where
-  sqlValueSyntax = fromString . show
+  sqlValueSyntax = textSyntax . Escape.escapeText . fromString . show
 
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax Scientific where
-  sqlValueSyntax = MysqlSyntax . (HS.empty,) . scientificBuilder
+  sqlValueSyntax = textSyntax . Escape.escapeText . builderToText . scientificBuilder
 
 -- Rational is exempted, because there's no good way to do this really
 
+-- SAFE: by induction
 instance (HasSqlValueSyntax MysqlSyntax a) =>
   HasSqlValueSyntax MysqlSyntax (Maybe a) where
   sqlValueSyntax = maybe (sqlValueSyntax SqlNull) sqlValueSyntax
 
+-- SAFE: constant
 instance HasSqlValueSyntax MysqlSyntax SqlNull where
   sqlValueSyntax = const "NULL"
 
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax ByteString where
   sqlValueSyntax = textSyntax . quoteWrapUnescaped . decodeUtf8 . Escape.escapeBytes
 
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax Text where
   sqlValueSyntax = quote
 
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax Day where
   sqlValueSyntax = quote . fromString . formatShow iso8601Format
 
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax TimeOfDay where
   sqlValueSyntax = quote . fromString . formatShow iso8601Format
 
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax LocalTime where
   sqlValueSyntax lt = quote (day <> " " <> tod)
     where
       day = fromString . formatShow iso8601Format . localDay $ lt
       tod = fromString . formatShow iso8601Format . localTimeOfDay $ lt
 
+{- SAFE: escaped
+
+NOTE: this is probably safe without escaping, but depends on the formatting
+      internals of a third-party library; we do not want to risk this
+-}
 instance HasSqlValueSyntax MysqlSyntax NominalDiffTime where
-  sqlValueSyntax d = textSyntax time
+  sqlValueSyntax d = textSyntax $ Escape.escapeText time
     where
       dWhole :: Int
       dWhole = abs . floor $ d
@@ -234,23 +278,32 @@ instance HasSqlValueSyntax MysqlSyntax NominalDiffTime where
               showFixed False secondsFixed |+
               ""
 
+-- SAFE depending on inputs
+builderToText :: Builder -> Text
+builderToText = TL.toStrict . toLazyText
+
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax Value where
   -- TODO: Aeson should return a Text
-  sqlValueSyntax = quote . TL.toStrict . toLazyText . encodeToTextBuilder
+  sqlValueSyntax = quote . builderToText . encodeToTextBuilder
 
 -- Extra convenience instances
 
+-- SAFE: Int -> Text
 instance HasSqlValueSyntax MysqlSyntax Integer where
   sqlValueSyntax = fromString . show
 
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax String where
   sqlValueSyntax = quote . fromString
 
+-- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax TL.Text where
   sqlValueSyntax = quote . TL.toStrict
 
 -- Syntax defs
 
+-- SAFE: beam fields are static
 instance IsSql92FieldNameSyntax MysqlSyntax where
   unqualifiedField = backtickWrap . textSyntax
   qualifiedField qual f =
@@ -258,10 +311,15 @@ instance IsSql92FieldNameSyntax MysqlSyntax where
     "." <>
     unqualifiedField f
 
+-- SAFE: constants
 instance IsSql92QuantifierSyntax MysqlSyntax where
   quantifyOverAll = "ALL"
   quantifyOverAny = "ANY"
 
+-- SAFE (probably): depends on values from `beam` and constants
+--
+-- TODO: Figure out what values beam provides here; needs review
+--
 instance IsSql92DataTypeSyntax MysqlDataTypeSyntax where
   domainType t = MysqlDataTypeSyntax go go
     where
@@ -303,6 +361,7 @@ instance IsSql92DataTypeSyntax MysqlDataTypeSyntax where
   timeType _ _ = MysqlDataTypeSyntax "TIME" "TIME"
   timestampType _ _ = MysqlDataTypeSyntax "TIMESTAMP" "DATETIME"
 
+-- Safe: constants
 instance IsSql92ExtractFieldSyntax MysqlSyntax where
   secondsField = "SECOND"
   minutesField = "MINUTE"
@@ -311,6 +370,8 @@ instance IsSql92ExtractFieldSyntax MysqlSyntax where
   monthField = "MONTH"
   yearField = "YEAR"
 
+-- SAFE: all these functions are SAFE, which follows from constants and
+-- by induction, as all functions are `expr -> expr`
 instance IsSql92ExpressionSyntax MysqlSyntax where
   type Sql92ExpressionValueSyntax MysqlSyntax = MysqlSyntax
   type Sql92ExpressionFieldNameSyntax MysqlSyntax = MysqlSyntax
@@ -380,10 +441,12 @@ instance IsSql92ExpressionSyntax MysqlSyntax where
   lowerE = funcall "LOWER"
   upperE = funcall "UPPER"
 
+-- SAFE: constants
 instance IsSql92AggregationSetQuantifierSyntax MysqlSyntax where
   setQuantifierDistinct = "DISTINCT"
   setQuantifierAll = "ALL"
 
+-- SAFE: constants and by induction (expr -> expr)
 instance IsSql92AggregationExpressionSyntax MysqlSyntax where
   type Sql92AggregationSetQuantifierSyntax MysqlSyntax = MysqlSyntax
   countAllE = "COUNT(*)"
@@ -393,6 +456,7 @@ instance IsSql92AggregationExpressionSyntax MysqlSyntax where
   minE = unaryAggregation "MIN"
   maxE = unaryAggregation "MAX"
 
+-- SAFE: names are statically defined
 instance IsSql92ProjectionSyntax MysqlSyntax where
   type Sql92ProjectionExpressionSyntax MysqlSyntax = MysqlSyntax
   projExprs = fold . intersperse ", " . fmap go
@@ -402,6 +466,7 @@ instance IsSql92ProjectionSyntax MysqlSyntax where
       go2 :: Text -> MysqlSyntax
       go2 = (" AS " <>) . backtickWrap . textSyntax
 
+-- SAFE: table names are statically defined
 instance IsSql92TableNameSyntax MysqlTableNameSyntax where
   tableName = MysqlTableNameSyntax
 
@@ -417,11 +482,14 @@ instance IsSql92TableSourceSyntax MysqlSyntax where
       go :: [MysqlSyntax] -> MysqlSyntax
       go = fold . intersperse ", " . fmap bracketWrap
 
+-- SAFE: by induction on sub-clauses
 instance IsSql92FromSyntax MysqlSyntax where
   type Sql92FromTableSourceSyntax MysqlSyntax = MysqlSyntax
   type Sql92FromExpressionSyntax MysqlSyntax = MysqlSyntax
   fromTable tableE = \case
+    -- SAFE: by induction
     Nothing -> tableE
+    -- SAFE: column names are statically defined, beam temporary names are safe
     Just (name, mCols) ->
       tableE <>
       " AS " <>
@@ -431,14 +499,18 @@ instance IsSql92FromSyntax MysqlSyntax where
       go :: [Text] -> MysqlSyntax
       go =
         bracketWrap . fold . intersperse ", " . fmap (backtickWrap . textSyntax)
+  -- SAEF: induction, constants
   innerJoin = joinOp "JOIN"
   leftJoin = joinOp "LEFT JOIN"
   rightJoin = joinOp "RIGHT JOIN"
 
+-- SAFE: by induction
 instance IsSql92GroupingSyntax MysqlSyntax where
   type Sql92GroupingExpressionSyntax MysqlSyntax = MysqlSyntax
+  groupByExpressions :: [MysqlSyntax] -> MysqlSyntax
   groupByExpressions = fold . intersperse ", "
 
+-- SAFE: by induction
 instance IsSql92SelectTableSyntax MysqlSyntax where
   type Sql92SelectTableSelectSyntax MysqlSyntax = MysqlSyntax
   type Sql92SelectTableExpressionSyntax MysqlSyntax = MysqlSyntax
@@ -446,6 +518,16 @@ instance IsSql92SelectTableSyntax MysqlSyntax where
   type Sql92SelectTableFromSyntax MysqlSyntax = MysqlSyntax
   type Sql92SelectTableGroupingSyntax MysqlSyntax = MysqlSyntax
   type Sql92SelectTableSetQuantifierSyntax MysqlSyntax = MysqlSyntax
+
+  selectTableStmt
+    -- :: Maybe MysqlSyntax
+    :: Maybe MysqlSyntax
+    -> MysqlSyntax
+    -> Maybe MysqlSyntax
+    -> Maybe MysqlSyntax
+    -> Maybe MysqlSyntax
+    -> Maybe MysqlSyntax
+    -> MysqlSyntax
   selectTableStmt quant proj from wher grouping having =
     "SELECT " <>
     foldMap (<> " ") quant <>
@@ -454,15 +536,36 @@ instance IsSql92SelectTableSyntax MysqlSyntax where
     foldMap (" WHERE " <>) wher <>
     foldMap (" GROUP BY " <>) grouping <>
     foldMap (" HAVING " <>) having
+
+  unionTables
+    :: Bool
+    -> MysqlSyntax
+    -> MysqlSyntax
+    -> MysqlSyntax
   unionTables isAll = if isAll
     then tableOp "UNION ALL"
     else tableOp "UNION"
+
+  intersectTables
+    :: Bool
+    -> MysqlSyntax
+    -> MysqlSyntax
+    -> MysqlSyntax
   intersectTables _ = tableOp "INTERSECT"
+
+  exceptTable
+    :: Bool
+    -> MysqlSyntax
+    -> MysqlSyntax
+    -> MysqlSyntax
   exceptTable _ = tableOp "EXCEPT"
 
+-- SAFE: by induction
 instance IsSql92OrderingSyntax MysqlSyntax where
   type Sql92OrderingExpressionSyntax MysqlSyntax = MysqlSyntax
+  ascOrdering :: MysqlSyntax -> MysqlSyntax
   ascOrdering = (<> " ASC")
+  descOrdering :: MysqlSyntax -> MysqlSyntax
   descOrdering = (<> " DESC")
 
 instance IsSql92SelectSyntax MysqlSyntax where
@@ -546,46 +649,60 @@ instance IsSql99ConcatExpressionSyntax MysqlSyntax where
 
 -- Helpers
 
+-- SAFE: escaped
 quote :: Text -> MysqlSyntax
 quote = textSyntax . quoteWrap
 
+-- SAFE: escaped
 quoteWrap :: Text -> Text
 quoteWrap = wrap "'" "'" . Escape.escapeText
 
+-- SAFE: depending on inputs
 quoteWrapUnescaped :: (IsString s, Semigroup s) => s -> s
 quoteWrapUnescaped = wrap "'" "'"
 
+-- SAFE: depending on inputs
 backtickWrap :: (IsString s, Semigroup s) => s -> s
 backtickWrap = wrap "`" "`"
 
+-- SAFE: depending on inputs
 bracketWrap :: (IsString s, Semigroup s) => s -> s
 bracketWrap = wrap "(" ")"
 
+-- SAFE: depending on inputs
 wrap :: (Semigroup s) => s -> s -> s -> s
 wrap lDelim rDelim x = lDelim <> x <> rDelim
 
+-- SAFE: depending on inputs
 binOp :: (Semigroup s, IsString s) => s -> s -> s -> s
 binOp op lOp rOp = bracketWrap lOp <> " " <> op <> " " <> bracketWrap rOp
 
+-- SAFE: depending on inputs
 compOp :: (IsString s, Foldable t, Monoid s) => s -> t s -> s -> s -> s
 compOp op quantifier lOp rOp =
   bracketWrap lOp <> " " <> op <> fold quantifier <> " " <> bracketWrap rOp
 
+-- SAFE: depending on inputs
 unaryOp :: (Semigroup s, IsString s) => s -> s -> s
 unaryOp op arg = op <> bracketWrap arg <> " "
 
+-- SAFE: depending on inputs
 postfix :: (Semigroup s, IsString s) => s -> s -> s
 postfix op arg = bracketWrap arg <> " " <> op
 
+-- SAFE: depending on inputs
 funcall :: (Semigroup s, IsString s) => s -> s -> s
 funcall fn arg = fn <> bracketWrap arg
 
+-- SAFE: depending on inputs
 unaryAggregation :: (IsString s, Foldable t, Monoid s) => s -> t s -> s -> s
 unaryAggregation fn q e = fn <> bracketWrap (foldMap (<> " ") q <> e)
 
+-- SAFE: depending on inputs
 joinOp :: (IsString s, Foldable t, Monoid s) =>
   s -> s -> s -> t s -> s
 joinOp joinType l r mOn = l <> " " <> joinType <> " " <> r <> fold mOn
 
+-- SAFE: depending on inputs
 tableOp :: (Semigroup s, IsString s) => s -> s -> s -> s
 tableOp op l r = l <> " " <> op <> " " <> r
