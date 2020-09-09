@@ -125,10 +125,11 @@ data MysqlTableNameSyntax = MysqlTableNameSyntax
 -- SAFE given that beam tables are statically defined
 intoTableName :: MysqlTableNameSyntax -> MysqlSyntax
 intoTableName (MysqlTableNameSyntax db name) =
-  MysqlSyntax . (HS.singleton name,) $ foldMap go db <> fromText name
+  MysqlSyntax . (HS.singleton name,) $ foldMap go db <>
+    (backtickWrap . fromText $ name)
   where
     go :: Text -> Builder
-    go t = fromText t <> "."
+    go t = (backtickWrap . fromText $ t) <> "."
 
 -- Insert values syntax to support runInsertRowReturning
 data MysqlInsertValuesSyntax =
@@ -654,7 +655,7 @@ instance IsSql92Syntax MysqlSyntax where
       go :: MysqlInsertValuesSyntax -> MysqlSyntax
       go = \case
         FromExprs exprs ->
-          "VALUES " <>
+          " VALUES " <>
           (fold . intersperse ", " . fmap go2 $ exprs)
         FromSQL sql -> sql
       go2 :: [MysqlSyntax] -> MysqlSyntax
