@@ -140,7 +140,11 @@ data MysqlInsertValuesSyntax =
 
 -- Insert syntax to support runInsertRowReturning
 data MysqlInsertSyntax =
-  Insert MysqlTableNameSyntax [Text] MysqlInsertValuesSyntax
+  Insert
+    { mysqlTableName :: MysqlTableNameSyntax
+    , fieldNames     :: [Text]
+    , fieldValues    :: MysqlInsertValuesSyntax
+    }
   deriving stock (Eq)
 
 -- How we convert everything types defined in FromField to MySQL syntax
@@ -569,9 +573,17 @@ instance IsSql92OrderingSyntax MysqlSyntax where
   descOrdering :: MysqlSyntax -> MysqlSyntax
   descOrdering = (<> " DESC")
 
+-- SAFE: integers, constants, induction
 instance IsSql92SelectSyntax MysqlSyntax where
   type Sql92SelectSelectTableSyntax MysqlSyntax = MysqlSyntax
   type Sql92SelectOrderingSyntax MysqlSyntax = MysqlSyntax
+
+  selectStmt
+    :: MysqlSyntax
+    -> [MysqlSyntax]
+    -> Maybe Integer
+    -> Maybe Integer
+    -> MysqlSyntax
   selectStmt tbl ordering limit offset =
     tbl <>
     (case ordering of
@@ -586,18 +598,20 @@ instance IsSql92SelectSyntax MysqlSyntax where
       (Just limit', Nothing)      -> " LIMIT " <> (fromString . show $ limit')
       _                           -> mempty
 
-
+-- SAFE: by induction
 instance IsSql92InsertValuesSyntax MysqlInsertValuesSyntax where
   type Sql92InsertValuesExpressionSyntax MysqlInsertValuesSyntax = MysqlSyntax
   type Sql92InsertValuesSelectSyntax MysqlInsertValuesSyntax = MysqlSyntax
   insertSqlExpressions = FromExprs
   insertFromSql = FromSQL
 
+-- SAFE: by induction
 instance IsSql92InsertSyntax MysqlInsertSyntax where
   type Sql92InsertValuesSyntax MysqlInsertSyntax = MysqlInsertValuesSyntax
   type Sql92InsertTableNameSyntax MysqlInsertSyntax = MysqlTableNameSyntax
   insertStmt = Insert
 
+-- SAFE: by induction
 instance IsSql92UpdateSyntax MysqlSyntax where
   type Sql92UpdateExpressionSyntax MysqlSyntax = MysqlSyntax
   type Sql92UpdateFieldNameSyntax MysqlSyntax = MysqlSyntax
@@ -611,6 +625,7 @@ instance IsSql92UpdateSyntax MysqlSyntax where
     foldMap (" WHERE " <>) wher
     where go (field, val) = field <> "=" <> val
 
+-- SAFE: by induction
 instance IsSql92DeleteSyntax MysqlSyntax where
   type Sql92DeleteTableNameSyntax MysqlSyntax = MysqlTableNameSyntax
   type Sql92DeleteExpressionSyntax MysqlSyntax = MysqlSyntax
@@ -620,6 +635,7 @@ instance IsSql92DeleteSyntax MysqlSyntax where
     foldMap (" WHERE " <>) wher
   deleteSupportsAlias = const False
 
+-- SAFE: by induction
 instance IsSql92Syntax MysqlSyntax where
   type Sql92SelectSyntax MysqlSyntax = MysqlSyntax
   type Sql92InsertSyntax MysqlSyntax = MysqlInsertSyntax
