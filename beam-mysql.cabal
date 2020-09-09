@@ -152,7 +152,9 @@ test-suite test-escaping-dsl
     , typed-process  ^>=0.2.6.0
     , unix           ^>=2.7.2.2
     , safe-exceptions
-    , mysql-haskell, text
+    , mysql-haskell
+    , text
+    , bytestring
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
   hs-source-dirs: test
