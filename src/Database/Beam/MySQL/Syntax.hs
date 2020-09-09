@@ -655,7 +655,7 @@ instance IsSql92Syntax MysqlSyntax where
       go :: MysqlInsertValuesSyntax -> MysqlSyntax
       go = \case
         FromExprs exprs ->
-          "VALUES " <>
+          " VALUES " <>
           (fold . intersperse ", " . fmap go2 $ exprs)
         FromSQL sql -> sql
       go2 :: [MysqlSyntax] -> MysqlSyntax
