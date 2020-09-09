@@ -12,6 +12,7 @@ module Database.Beam.MySQL.Syntax
   defaultE, backtickWrap, intoLazyText, textSyntax
 ) where
 
+-- TODO: Use qualified imports
 import           Data.Aeson (Value)
 import           Data.Aeson.Text (encodeToTextBuilder)
 import           Data.ByteString (ByteString)
@@ -26,8 +27,7 @@ import           Data.String (IsString, fromString)
 import           Data.Text (Text)
 import           Data.Text.Encoding (decodeUtf8)
 import qualified Data.Text.Lazy as TL
-import           Data.Text.Lazy.Builder (Builder, fromLazyText, fromText,
-                                         toLazyText)
+import           Data.Text.Lazy.Builder (Builder, fromText, toLazyText)
 import           Data.Text.Lazy.Builder.Scientific (scientificBuilder)
 import qualified Data.Text.Lazy.Encoding as TLE
 import           Data.Time.Calendar (Day)
@@ -59,7 +59,7 @@ import           Database.Beam.Backend.SQL (HasSqlValueSyntax (..), IsSql92Aggre
                                             IsSql99ConcatExpressionSyntax (..),
                                             SqlNull (..))
 import           Database.MySQL.Base (Query (..))
-import           Database.MySQL.Protocol.Escape (escapeText)
+import qualified Database.MySQL.Protocol.Escape as Escape
 import           Fmt (build, unlinesF, whenF, (+|), (|+))
 
 -- General syntax type
@@ -190,22 +190,19 @@ instance HasSqlValueSyntax MysqlSyntax SqlNull where
   sqlValueSyntax = const "NULL"
 
 instance HasSqlValueSyntax MysqlSyntax ByteString where
-  sqlValueSyntax = quoteWrap . textSyntax . decodeUtf8
+  sqlValueSyntax = textSyntax . quoteWrapUnescaped . decodeUtf8 . Escape.escapeBytes
 
 instance HasSqlValueSyntax MysqlSyntax Text where
-  sqlValueSyntax = quoteWrap . textSyntax . escapeText
+  sqlValueSyntax = quote
 
 instance HasSqlValueSyntax MysqlSyntax Day where
-  sqlValueSyntax =
-    MysqlSyntax . (HS.empty,) . quoteWrap . fromString . formatShow iso8601Format
+  sqlValueSyntax = quote . fromString . formatShow iso8601Format
 
 instance HasSqlValueSyntax MysqlSyntax TimeOfDay where
-  sqlValueSyntax =
-    MysqlSyntax . (HS.empty,) . quoteWrap . fromString . formatShow iso8601Format
+  sqlValueSyntax = quote . fromString . formatShow iso8601Format
 
 instance HasSqlValueSyntax MysqlSyntax LocalTime where
-  sqlValueSyntax lt =
-    MysqlSyntax . (HS.empty,) . quoteWrap $ (day <> " " <> tod)
+  sqlValueSyntax lt = quote (day <> " " <> tod)
     where
       day = fromString . formatShow iso8601Format . localDay $ lt
       tod = fromString . formatShow iso8601Format . localTimeOfDay $ lt
@@ -238,8 +235,8 @@ instance HasSqlValueSyntax MysqlSyntax NominalDiffTime where
               ""
 
 instance HasSqlValueSyntax MysqlSyntax Value where
-  sqlValueSyntax =
-    MysqlSyntax . (HS.empty,) . quoteWrap . encodeToTextBuilder
+  -- TODO: Aeson should return a Text
+  sqlValueSyntax = quote . TL.toStrict . toLazyText . encodeToTextBuilder
 
 -- Extra convenience instances
 
@@ -247,12 +244,10 @@ instance HasSqlValueSyntax MysqlSyntax Integer where
   sqlValueSyntax = fromString . show
 
 instance HasSqlValueSyntax MysqlSyntax String where
-  sqlValueSyntax =
-    MysqlSyntax . (HS.empty,) . quoteWrap . escapeText . fromString
+  sqlValueSyntax = quote . fromString
 
 instance HasSqlValueSyntax MysqlSyntax TL.Text where
-  sqlValueSyntax =
-    MysqlSyntax . (HS.empty,) . quoteWrap . escapeText . fromLazyText
+  sqlValueSyntax = quote . TL.toStrict
 
 -- Syntax defs
 
@@ -551,8 +546,14 @@ instance IsSql99ConcatExpressionSyntax MysqlSyntax where
 
 -- Helpers
 
-quoteWrap :: (IsString s, Semigroup s) => s -> s
-quoteWrap = wrap "'" "'"
+quote :: Text -> MysqlSyntax
+quote = textSyntax . quoteWrap
+
+quoteWrap :: Text -> Text
+quoteWrap = wrap "'" "'" . Escape.escapeText
+
+quoteWrapUnescaped :: (IsString s, Semigroup s) => s -> s
+quoteWrapUnescaped = wrap "'" "'"
 
 backtickWrap :: (IsString s, Semigroup s) => s -> s
 backtickWrap = wrap "`" "`"
