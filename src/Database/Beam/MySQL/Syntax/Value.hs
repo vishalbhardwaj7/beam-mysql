@@ -1,117 +1,114 @@
 module Database.Beam.MySQL.Syntax.Value where
 
-import           Data.Bool (bool)
 import           Data.ByteString (ByteString)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Scientific (Scientific)
 import           Data.Text (Text)
-import           Data.Time (Day, LocalTime, TimeOfDay)
+import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (HasSqlValueSyntax (sqlValueSyntax),
                                             SqlNull)
-import           Database.MySQL.Base (MySQLValue (..), Param (One),
-                                      QueryParam (render))
-import           Generic.Data (gcompare)
 
--- A user-provided parameter
-newtype P = P MySQLValue
-  deriving newtype (Eq)
-  deriving stock (Show)
-
-instance Ord P where
-  {-# INLINE compare #-}
-  compare (P val) (P val2) = gcompare val val2
-
-instance QueryParam P where
-  {-# INLINABLE render #-}
-  render (P val) = render . One $ val
-
-newtype MySQLValueSyntax = MySQLValueSyntax P
-  deriving stock (Show)
-  deriving newtype (Eq)
-
-intoValueSyntax :: (a -> MySQLValue) -> a -> MySQLValueSyntax
-intoValueSyntax f = MySQLValueSyntax . P . f
+data MySQLValueSyntax =
+  VBool !Bool |
+  VInt8 {-# UNPACK #-} !Int8 |
+  VInt16 {-# UNPACK #-} !Int16 |
+  VInt32 {-# UNPACK #-} !Int32 |
+  VInt64 {-# UNPACK #-} !Int64 |
+  VWord8 {-# UNPACK #-} !Word8 |
+  VWord16 {-# UNPACK #-} !Word16 |
+  VWord32 {-# UNPACK #-} !Word32 |
+  VWord64 {-# UNPACK #-} !Word64 |
+  VScientific {-# UNPACK #-} !Scientific |
+  VNothing | -- Missing value
+  VNull | -- SQL NULL
+  VByteString {-# UNPACK #-} !ByteString |
+  VText {-# UNPACK #-} !Text |
+  VDay !Day |
+  VLocalTime {-# UNPACK #-} !LocalTime |
+  VTimeOfDay {-# UNPACK #-} !TimeOfDay |
+  VNominalDiffTime !NominalDiffTime
+  deriving stock (Eq, Show)
 
 instance HasSqlValueSyntax MySQLValueSyntax Bool where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax (MySQLInt8 . bool 0 1)
+  sqlValueSyntax = VBool
 
 instance HasSqlValueSyntax MySQLValueSyntax Int8 where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLInt8
+  sqlValueSyntax = VInt8
 
 instance HasSqlValueSyntax MySQLValueSyntax Int16 where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLInt16
+  sqlValueSyntax = VInt16
 
 instance HasSqlValueSyntax MySQLValueSyntax Int32 where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLInt32
+  sqlValueSyntax = VInt32
 
 instance HasSqlValueSyntax MySQLValueSyntax Int64 where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLInt64
+  sqlValueSyntax = VInt64
 
 instance HasSqlValueSyntax MySQLValueSyntax Int where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax (MySQLInt64 . fromIntegral)
+  sqlValueSyntax = VInt64 . fromIntegral
 
 instance HasSqlValueSyntax MySQLValueSyntax Word8 where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLInt8U
+  sqlValueSyntax = VWord8
 
 instance HasSqlValueSyntax MySQLValueSyntax Word16 where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLInt16U
+  sqlValueSyntax = VWord16
 
 instance HasSqlValueSyntax MySQLValueSyntax Word32 where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLInt32U
+  sqlValueSyntax = VWord32
 
 instance HasSqlValueSyntax MySQLValueSyntax Word64 where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLInt64U
+  sqlValueSyntax = VWord64
 
 instance HasSqlValueSyntax MySQLValueSyntax Word where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax (MySQLInt64U . fromIntegral)
+  sqlValueSyntax = VWord64 . fromIntegral
 
 instance HasSqlValueSyntax MySQLValueSyntax Scientific where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLDecimal
+  sqlValueSyntax = VScientific
 
 instance (HasSqlValueSyntax MySQLValueSyntax a) =>
   HasSqlValueSyntax MySQLValueSyntax (Maybe a) where
   {-# INLINABLE sqlValueSyntax #-}
   sqlValueSyntax = \case
-    Nothing -> MySQLValueSyntax . P $ MySQLNull
+    Nothing -> VNothing
     Just x -> sqlValueSyntax x
 
 instance HasSqlValueSyntax MySQLValueSyntax SqlNull where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax _ = MySQLValueSyntax . P $ MySQLNull
+  sqlValueSyntax = const VNull
 
 instance HasSqlValueSyntax MySQLValueSyntax ByteString where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLBytes
+  sqlValueSyntax = VByteString
 
 instance HasSqlValueSyntax MySQLValueSyntax Text where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLText
+  sqlValueSyntax = VText
 
 instance HasSqlValueSyntax MySQLValueSyntax Day where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLDate
+  sqlValueSyntax = VDay
 
 instance HasSqlValueSyntax MySQLValueSyntax TimeOfDay where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax (MySQLTime 0)
+  sqlValueSyntax = VTimeOfDay
 
 instance HasSqlValueSyntax MySQLValueSyntax LocalTime where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = intoValueSyntax MySQLDateTime
+  sqlValueSyntax = VLocalTime
 
--- TODO: NominalDiffTime - the target is MySQLDateTime, with appropriate sign. -
--- Koz
-
+instance HasSqlValueSyntax MySQLValueSyntax NominalDiffTime where
+  {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax = VNominalDiffTime

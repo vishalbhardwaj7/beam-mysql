@@ -12,8 +12,7 @@ import           Database.Beam.Backend.SQL (IsSql92ExpressionSyntax (..))
 import           Database.Beam.MySQL.Syntax.DataType (MySQLDataTypeSyntax (..))
 import           Database.Beam.MySQL.Syntax.Misc (MySQLExtractFieldSyntax, MySQLFieldNameSyntax (QualifiedField, UnqualifiedField),
                                                   MySQLQuantifierSyntax)
-import           Database.Beam.MySQL.Syntax.Value (MySQLValueSyntax (MySQLValueSyntax),
-                                                   P)
+import           Database.Beam.MySQL.Syntax.Value (MySQLValueSyntax)
 import qualified Language.C.Inline as C
 import           Prelude hiding (map)
 
@@ -38,7 +37,7 @@ instance Monoid Purity where
 data ExpressionAnn =
   ExpressionAnn
     !Purity
-    {-# UNPACK #-} !(Vector P)
+    {-# UNPACK #-} !(Vector MySQLValueSyntax)
     !(HashSet Text)
   deriving stock (Eq, Show)
 
@@ -53,8 +52,7 @@ foldAnn :: Vector ExpressionAnn -> ExpressionAnn
 foldAnn = foldl1' (<>)
 
 fromValues :: MySQLValueSyntax -> ExpressionAnn
-fromValues (MySQLValueSyntax p) =
-  ExpressionAnn Pure (singleton p) mempty
+fromValues p = ExpressionAnn Pure (singleton p) mempty
 
 data BinOp =
   LAnd |
