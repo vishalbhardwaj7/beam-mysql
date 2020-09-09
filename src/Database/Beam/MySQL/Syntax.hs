@@ -228,9 +228,13 @@ instance (HasSqlValueSyntax MysqlSyntax a) =>
 instance HasSqlValueSyntax MysqlSyntax SqlNull where
   sqlValueSyntax = const "NULL"
 
--- SAFE: escaped
+-- DISABLED
 instance HasSqlValueSyntax MysqlSyntax ByteString where
-  sqlValueSyntax = textSyntax . quoteWrapUnescaped . decodeUtf8 . Escape.escapeBytes
+  -- TODO: It is *probably* correct to escape the bytestring, decode with
+  --       latin1 and encode with latin1 to go from Text -> ByteString
+  --       in `intoQuery`; disable for now
+  sqlValueSyntax = error "Dabase.Beam.MySQL: ByteString not supported" 
+  -- textSyntax . quoteWrapUnescaped . decodeUtf8 . Escape.escapeBytes
 
 -- SAFE: escaped
 instance HasSqlValueSyntax MysqlSyntax Text where
@@ -391,7 +395,8 @@ instance IsSql92ExpressionSyntax MysqlSyntax where
   modE = binOp "%"
   orE = binOp "OR"
   andE = binOp "AND"
-  likeE = binOp "LIKE"
+  -- TODO: Need escaping of _ and % in LIKE patterns
+  likeE = error "Database.Beam.MySQL: LIKE not supported" -- binOp "LIKE"
   overlapsE = binOp "OVERLAPS"
   eqE = compOp "="
   neqE = compOp "<>"
