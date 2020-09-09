@@ -4,24 +4,28 @@
 
 module Main (main) where
 
+import           Control.Monad (forM_)
 import           Data.Functor.Identity (Identity)
 import           Data.Kind (Type)
 import           Data.Text (Text)
+import qualified Data.Text as T
+import           Data.Text.Lazy (toStrict)
 import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 Table (PrimaryKey, primaryKey), TableEntity,
                                 defaultDbSettings)
-import           Database.Beam.MySQL (MySQL, dumpDeleteSQL, dumpInsertSQL,
-                                      dumpSelectSQL, dumpUpdateSQL)
+import           Database.Beam.Backend.SQL (insertCmd, updateCmd)
+import           Database.Beam.MySQL (MySQL, intoLazyText)
 import           Database.Beam.Query (QBaseScope, QExpr, QFieldAssignment,
-                                      SqlDelete, SqlInsert, SqlSelect,
-                                      SqlUpdate, all_, delete, filter_, insert,
+                                      SqlDelete (SqlDelete),
+                                      SqlInsert (SqlInsert, SqlInsertNoRows),
+                                      SqlSelect (SqlSelect),
+                                      SqlUpdate (SqlIdentityUpdate, SqlUpdate),
+                                      all_, delete, filter_, insert,
                                       insertValues, select, toNewValue,
                                       updateTable, val_, (==.))
 import           GHC.Generics (Generic)
 import           Test.Hspec (describe, hspec, it, shouldBe)
 import qualified Test.Hspec as Hspec
-import qualified Data.Text as T
-import           Control.Monad (forM_)
 
 -- See "mysql-haskell".Database.MySQL.Protocol.Escape
 -- and  <http://dev.mysql.com/doc/refman/5.7/en/string-literals.html>
@@ -63,7 +67,7 @@ escapeSequenceSpec (repr, escapeSeq) = do
 
 main :: IO ()
 main = hspec $ do
-  forM_ escapeSequences $ escapeSequenceSpec
+  forM_ escapeSequences escapeSequenceSpec
 
 -- Helpers
 
@@ -85,13 +89,29 @@ updateWhereStmt escapeSeq = updateTable (_testTestTable testDB) upd wher
     upd :: TestT (QFieldAssignment MySQL TestT)
     upd = TestT (toNewValue (val_ $ "bar" <> escapeSeq))
     wher :: forall s . TestT (QExpr MySQL s) -> QExpr MySQL s Bool
-    wher row = _testText row ==. (val_ $ "foo" <> escapeSeq)
+    wher row = _testText row ==. val_ ("foo" <> escapeSeq)
 
 deleteWhereStmt :: Text -> SqlDelete MySQL TestT
 deleteWhereStmt escapeSeq = delete (_testTestTable testDB) go
   where
     go :: (forall s' . TestT (QExpr MySQL s')) -> QExpr MySQL s Bool
-    go row = _testText row ==. (val_ $ "foo" <> escapeSeq)
+    go row = _testText row ==. val_ ("foo" <> escapeSeq)
+
+dumpInsertSQL :: SqlInsert MySQL TestT -> Maybe Text
+dumpInsertSQL = \case
+  SqlInsertNoRows -> Nothing
+  SqlInsert _ ins -> Just . toStrict . intoLazyText . insertCmd $ ins
+
+dumpSelectSQL :: SqlSelect MySQL (TestT Identity) -> Text
+dumpSelectSQL (SqlSelect sel) = toStrict . intoLazyText $ sel
+
+dumpUpdateSQL :: SqlUpdate MySQL TestT -> Maybe Text
+dumpUpdateSQL = \case
+  SqlIdentityUpdate -> Nothing
+  SqlUpdate _ upd -> Just . toStrict . intoLazyText . updateCmd $ upd
+
+dumpDeleteSQL :: SqlDelete MySQL TestT -> Text
+dumpDeleteSQL (SqlDelete _ del) = toStrict . intoLazyText $ del
 
 newtype TestT (f :: Type -> Type) = TestT
   {

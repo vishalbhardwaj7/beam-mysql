@@ -141,7 +141,7 @@ common common-test
     , mysql-temp
     , unordered-containers
 
-test-suite test-escaping-dsl
+test-suite escaping-dsl
   import:         common-test
   build-depends:
     , bytestring
@@ -158,3 +158,10 @@ test-suite test-escaping-dsl
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
   hs-source-dirs: test
+
+test-suite text-escaping
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:  text
+  hs-source-dirs: test/text-escaping
