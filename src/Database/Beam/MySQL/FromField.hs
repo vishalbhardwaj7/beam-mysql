@@ -1,11 +1,9 @@
 {-# LANGUAGE AllowAmbiguousTypes    #-}
-{-# LANGUAGE DataKinds              #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs                  #-}
 {-# LANGUAGE KindSignatures         #-}
 {-# LANGUAGE ScopedTypeVariables    #-}
 {-# LANGUAGE StandaloneDeriving     #-}
-{-# LANGUAGE TypeApplications       #-}
 {-# LANGUAGE UndecidableInstances   #-}
 
 module Database.Beam.MySQL.FromField where

@@ -10,8 +10,13 @@ import           Database.Beam.Backend.SQL (IsSql92AggregationExpressionSyntax (
                                             IsSql92QuantifierSyntax (..))
 
 data MySQLFieldNameSyntax =
-  QualifiedField {-# UNPACK #-} !Text {-# UNPACK #-} !Text |
-  UnqualifiedField {-# UNPACK #-} !Text
+  QualifiedField {
+    table :: {-# UNPACK #-} !Text,
+    field :: {-# UNPACK #-} !Text
+    } |
+  UnqualifiedField {
+    field :: {-# UNPACK #-} !Text
+    }
   deriving stock (Eq, Show)
 
 instance IsSql92FieldNameSyntax MySQLFieldNameSyntax where

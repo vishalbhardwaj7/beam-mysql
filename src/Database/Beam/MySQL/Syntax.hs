@@ -3,7 +3,6 @@ module Database.Beam.MySQL.Syntax where
 
 {-
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE TypeFamilies        #-}
 
 module Database.Beam.MySQL.Syntax

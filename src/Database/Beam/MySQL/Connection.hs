@@ -1,7 +1,5 @@
 {-# LANGUAGE CPP                 #-}
-{-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE TypeFamilies        #-}
 
 module Database.Beam.MySQL.Connection where

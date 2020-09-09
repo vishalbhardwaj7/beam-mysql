@@ -5,30 +5,46 @@ import           Database.Beam.Backend.SQL (IsSql92DataTypeSyntax (..))
 
 data MySQLPrecision =
   None |
-  Lower {-# UNPACK #-} !Word |
-  Both {-# UNPACK #-} !Word {-# UNPACK #-} !Word
+  DigitsOnly {-# UNPACK #-} !Word |
+  DigitsScale {-# UNPACK #-} !Word {-# UNPACK #-} !Word
   deriving stock (Eq, Show)
 
 intoMySQLPrecision :: Maybe (Word, Maybe Word) -> MySQLPrecision
 intoMySQLPrecision = \case
   Nothing -> None
   Just (d, mn) -> case mn of
-    Nothing -> Lower d
-    Just n  -> Both d n
+    Nothing -> DigitsOnly d
+    Just n  -> DigitsScale d n
 
 data MySQLDataTypeSyntax =
   DomainType {-# UNPACK #-} !Text |
-  CharType !(Maybe Word) !(Maybe Text) | -- length, character set
-  VarCharType !(Maybe Word) !(Maybe Text) | -- length, character set
-  NationalCharType !(Maybe Word) | -- length
-  NationalVarCharType !(Maybe Word) | -- length
-  BitType !(Maybe Word) | -- length
-  VarBitType !(Maybe Word) | -- length
+  CharType {
+    length       :: !(Maybe Word),
+    characterSet :: !(Maybe Text)
+    } |
+  VarCharType {
+    length       :: !(Maybe Word),
+    characterSet :: !(Maybe Text)
+    } |
+  NationalCharType {
+    length :: !(Maybe Word)
+    } |
+  NationalVarCharType {
+    length :: !(Maybe Word)
+    } |
+  BitType {
+    length :: !(Maybe Word)
+    } |
+  VarBitType {
+    length :: !(Maybe Word)
+    } |
   NumericType !MySQLPrecision |
   DecimalType !MySQLPrecision |
   IntType |
   SmallIntType |
-  FloatType !(Maybe Word) | -- precision
+  FloatType {
+    precision :: !(Maybe Word)
+    } |
   DoubleType |
   RealType |
   DateType |

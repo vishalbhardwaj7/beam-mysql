@@ -34,11 +34,11 @@ instance Semigroup Purity where
 instance Monoid Purity where
   mempty = Pure
 
-data ExpressionAnn =
-  ExpressionAnn
-    !Purity
-    {-# UNPACK #-} !(Vector MySQLValueSyntax)
-    !(HashSet Text)
+data ExpressionAnn = ExpressionAnn {
+  purity         :: !Purity,
+  parameters     :: {-# UNPACK #-} !(Vector MySQLValueSyntax),
+  tablesInvolved :: !(HashSet Text)
+  }
   deriving stock (Eq, Show)
 
 instance Semigroup ExpressionAnn where
@@ -99,101 +99,103 @@ data PostOp =
   deriving stock (Eq, Show)
 
 data MySQLExpressionSyntax =
-  Placeholder !ExpressionAnn |
-  Row
-    !ExpressionAnn
-    {-# UNPACK #-} !(Vector MySQLExpressionSyntax) |
-  Coalesce
-    !ExpressionAnn
-    {-# UNPACK #-} !(Vector MySQLExpressionSyntax) |
-  Case
-    !ExpressionAnn
-    {-# UNPACK #-} !(Vector (MySQLExpressionSyntax, MySQLExpressionSyntax))
-    MySQLExpressionSyntax |
-  Field
-    !ExpressionAnn
-    !MySQLFieldNameSyntax |
-  BinaryOperation
-    !ExpressionAnn
-    !BinOp
-    MySQLExpressionSyntax
-    MySQLExpressionSyntax |
-  ComparisonOperation
-    !ExpressionAnn
-    !CompOp
-    !(Maybe MySQLQuantifierSyntax)
-    MySQLExpressionSyntax
-    MySQLExpressionSyntax |
-  PrefixOperation
-    !ExpressionAnn
-    !PrefOp
-    MySQLExpressionSyntax |
-  PostfixOperation
-    !ExpressionAnn
-    !PostOp
-    MySQLExpressionSyntax |
-  NullIf
-    !ExpressionAnn
-    MySQLExpressionSyntax
-    MySQLExpressionSyntax |
-  Position
-    !ExpressionAnn
-    MySQLExpressionSyntax
-    MySQLExpressionSyntax |
-  Cast
-    !ExpressionAnn
-    !MySQLDataTypeSyntax
-    MySQLExpressionSyntax |
-  Extract
-    !ExpressionAnn
-    !MySQLExtractFieldSyntax
-    MySQLExpressionSyntax |
-  CurrentTimestamp
-    !ExpressionAnn |
-  Default
-    !ExpressionAnn |
-  In
-    !ExpressionAnn
-    MySQLExpressionSyntax
-    {-# UNPACK #-} !(Vector MySQLExpressionSyntax) |
-  Between
-    !ExpressionAnn
-    MySQLExpressionSyntax
-    MySQLExpressionSyntax
-    MySQLExpressionSyntax |
-  Exists
-    !ExpressionAnn
-    !MySQLSelectSyntax |
-  Unique
-    !ExpressionAnn
-    !MySQLSelectSyntax |
-  Subquery
-    !ExpressionAnn
-    !MySQLSelectSyntax
+  Placeholder {
+    ann :: !ExpressionAnn
+    } |
+  Row {
+    ann   :: !ExpressionAnn,
+    exprs :: {-# UNPACK #-} !(Vector MySQLExpressionSyntax)
+    } |
+  Coalesce {
+    ann   :: !ExpressionAnn,
+    exprs :: {-# UNPACK #-} !(Vector MySQLExpressionSyntax)
+    } |
+  Case {
+    ann :: !ExpressionAnn,
+    cases ::
+      {-# UNPACK #-} !(Vector (MySQLExpressionSyntax, MySQLExpressionSyntax)),
+    defaultCase :: MySQLExpressionSyntax
+    } |
+  Field {
+    ann       :: !ExpressionAnn,
+    fieldName :: !MySQLFieldNameSyntax
+    } |
+  BinaryOperation {
+    ann      :: !ExpressionAnn,
+    binOp    :: !BinOp,
+    lOperand :: MySQLExpressionSyntax,
+    rOperand :: MySQLExpressionSyntax
+    } |
+  ComparisonOperation {
+    ann        :: !ExpressionAnn,
+    compOp     :: !CompOp,
+    quantifier :: !(Maybe MySQLQuantifierSyntax),
+    lOperand   :: MySQLExpressionSyntax,
+    rOperand   :: MySQLExpressionSyntax
+    } |
+  PrefixOperation {
+    ann     :: !ExpressionAnn,
+    prefOp  :: !PrefOp,
+    operand :: MySQLExpressionSyntax
+    } |
+  PostfixOperation {
+    ann     :: !ExpressionAnn,
+    postOp  :: !PostOp,
+    operand :: MySQLExpressionSyntax
+    } |
+  NullIf {
+    ann    :: !ExpressionAnn,
+    expr   :: MySQLExpressionSyntax,
+    ifNull :: MySQLExpressionSyntax
+    } |
+  Position {
+    ann      :: !ExpressionAnn,
+    needle   :: MySQLExpressionSyntax,
+    haystack :: MySQLExpressionSyntax
+    } |
+  Cast {
+    ann    :: !ExpressionAnn,
+    target :: !MySQLDataTypeSyntax,
+    expr   :: MySQLExpressionSyntax
+    } |
+  Extract {
+    ann   :: !ExpressionAnn,
+    field :: !MySQLExtractFieldSyntax,
+    expr  :: MySQLExpressionSyntax
+    } |
+  CurrentTimestamp {
+    ann :: !ExpressionAnn
+    } |
+  Default {
+    ann :: !ExpressionAnn
+    } |
+  In {
+    ann   :: !ExpressionAnn,
+    expr  :: MySQLExpressionSyntax,
+    exprs :: {-# UNPACK #-} !(Vector MySQLExpressionSyntax)
+    } |
+  Between {
+    ann  :: !ExpressionAnn,
+    expr :: MySQLExpressionSyntax,
+    lo   :: MySQLExpressionSyntax,
+    hi   :: MySQLExpressionSyntax
+    } |
+  Exists {
+    ann    :: !ExpressionAnn,
+    select :: !MySQLSelectSyntax
+    } |
+  Unique {
+    ann    :: !ExpressionAnn,
+    select :: !MySQLSelectSyntax
+    } |
+  Subquery {
+    ann    :: !ExpressionAnn,
+    select :: !MySQLSelectSyntax
+    }
   deriving stock (Eq, Show)
 
 getAnn :: MySQLExpressionSyntax -> ExpressionAnn
-getAnn = \case
-  Placeholder ann -> ann
-  Row ann _ -> ann
-  Coalesce ann _ -> ann
-  Case ann _ _ -> ann
-  Field ann _ -> ann
-  BinaryOperation ann _ _ _ -> ann
-  ComparisonOperation ann _ _ _ _ -> ann
-  PrefixOperation ann _ _ -> ann
-  PostfixOperation ann _ _ -> ann
-  NullIf ann _ _ -> ann
-  Position ann _ _ -> ann
-  Cast ann _ _ -> ann
-  Extract ann _ _ -> ann
-  CurrentTimestamp ann -> ann
-  Default ann -> ann
-  Between ann _ _ _ -> ann
-  Exists ann _ -> ann
-  Unique ann _ -> ann
-  Subquery ann _ -> ann
-  In ann _ _ -> ann
+getAnn = ann
 
 instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
   type Sql92ExpressionValueSyntax MySQLExpressionSyntax =
@@ -215,17 +217,17 @@ instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
   {-# INLINABLE coalesceE #-}
   coalesceE = (\v -> Coalesce (foldAnn . map getAnn $ v) v) . fromList
   {-# INLINABLE caseE #-}
-  caseE cases def = Case ann casesV def
+  caseE cases' def = Case ann' casesV def
     where
       casesV :: Vector (MySQLExpressionSyntax, MySQLExpressionSyntax)
-      casesV = fromList cases
-      ann :: ExpressionAnn
-      ann = foldl' go (getAnn def) casesV
+      casesV = fromList cases'
+      ann' :: ExpressionAnn
+      ann' = foldl' go (getAnn def) casesV
       go ::
         ExpressionAnn ->
         (MySQLExpressionSyntax, MySQLExpressionSyntax) ->
         ExpressionAnn
-      go ann' (e1, e2) = ann' <> getAnn e1 <> getAnn e2
+      go ann'' (e1, e2) = ann'' <> getAnn e1 <> getAnn e2
   {-# INLINABLE fieldE #-}
   fieldE = \case
     f@(QualifiedField tableName _) ->
@@ -253,8 +255,8 @@ instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
   {-# INLINABLE nullIfE #-}
   nullIfE l r = NullIf (getAnn l <> getAnn r) l r
   {-# INLINABLE positionE #-}
-  positionE needle haystack =
-    Position (getAnn needle <> getAnn haystack) needle haystack
+  positionE needle' haystack' =
+    Position (getAnn needle' <> getAnn haystack') needle' haystack'
   {-# INLINABLE eqE #-}
   eqE = makeCompOp CEq
   {-# INLINABLE neqE #-}
@@ -304,7 +306,7 @@ instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
   {-# INLINABLE absE #-}
   absE = makePrefixOp NAbs
   {-# INLINABLE extractE #-}
-  extractE field from = Extract (getAnn from) field from
+  extractE field' from = Extract (getAnn from) field' from
   {-# INLINABLE existsE #-}
   existsE sel = Exists (ExpressionAnn Impure mempty mempty) sel -- TODO: Complete.
   {-# INLINABLE uniqueE #-}
@@ -338,15 +340,15 @@ instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
             then Impure
             else Pure
   {-# INLINABLE inE #-}
-  inE e es = In ann e esV
+  inE e es = In ann' e esV
     where
-      ann :: ExpressionAnn
-      ann = foldl' (\acc e' -> acc <> getAnn e') (getAnn e) esV
+      ann' :: ExpressionAnn
+      ann' = foldl' (\acc e' -> acc <> getAnn e') (getAnn e) esV
       esV :: Vector MySQLExpressionSyntax
       esV = fromList es
   {-# INLINABLE betweenE #-}
-  betweenE arg lo hi =
-    Between (getAnn arg <> getAnn lo <> getAnn hi) arg lo hi
+  betweenE arg lo' hi' =
+    Between (getAnn arg <> getAnn lo' <> getAnn hi') arg lo' hi'
 
 -- Helpers
 
