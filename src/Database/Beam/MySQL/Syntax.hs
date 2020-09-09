@@ -1,3 +1,7 @@
+module Database.Beam.MySQL.Syntax where
+
+
+{-
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE TypeFamilies        #-}
@@ -726,4 +730,4 @@ joinOp joinType l r mOn = l <> " " <> joinType <> " " <> r <> fold mOn
 
 -- SAFE: depending on inputs
 tableOp :: (Semigroup s, IsString s) => s -> s -> s -> s
-tableOp op l r = l <> " " <> op <> " " <> r
+tableOp op l r = l <> " " <> op <> " " <> r -}

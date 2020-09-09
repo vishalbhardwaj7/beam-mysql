@@ -10,6 +10,7 @@
 * Ensure proper escaping of `Text` values
 * Add `dumpInsertSQL`, `dumpSelectSQL`, `dumpDeleteSQL`, `dumpUpdateSQL` for 
   debugging SQL query generator output
+* Restructure internal SQL AST representation
 
 ## 1.0.0.0
 
