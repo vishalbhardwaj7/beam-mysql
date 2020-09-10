@@ -1,5 +1,12 @@
+{-# LANGUAGE TypeFamilies #-}
+
 module Database.Beam.MySQL.Syntax where
 
+import           Database.Beam.MySQL.Syntax.Select (MySQLSelect)
+
+data MySQLSyntax =
+  ASelect !MySQLSelect
+  deriving stock (Eq, Show)
 
 {-
 {-# LANGUAGE ScopedTypeVariables #-}

@@ -1,7 +1,11 @@
+-- Due to RDP plugin
+{-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
+
 module Database.Beam.MySQL.Syntax.DataType where
 
 import           Data.Text (Text)
 import           Database.Beam.Backend.SQL (IsSql92DataTypeSyntax (..))
+import           Prelude hiding (length)
 
 data MySQLPrecision =
   None |

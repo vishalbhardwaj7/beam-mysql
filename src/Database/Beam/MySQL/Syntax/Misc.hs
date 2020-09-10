@@ -1,10 +1,11 @@
+-- Due to RDP plugin
+{-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Database.Beam.MySQL.Syntax.Misc where
 
 import           Data.Text (Text)
-import           Database.Beam.Backend.SQL (IsSql92AggregationExpressionSyntax (..),
-                                            IsSql92AggregationSetQuantifierSyntax (..),
+import           Database.Beam.Backend.SQL (IsSql92AggregationSetQuantifierSyntax (..),
                                             IsSql92ExtractFieldSyntax (..),
                                             IsSql92FieldNameSyntax (..),
                                             IsSql92QuantifierSyntax (..))
@@ -67,35 +68,3 @@ instance IsSql92AggregationSetQuantifierSyntax MySQLAggregationSetQuantifierSynt
   setQuantifierDistinct = SetDistinct
   {-# INLINABLE setQuantifierAll #-}
   setQuantifierAll = SetAll
-
-data AggOp =
-  Count |
-  Avg |
-  Sum |
-  Min |
-  Max
-  deriving stock (Eq, Show)
-
-data MySQLAggregationExpressionSyntax =
-  CountAll |
-  Aggregation
-    !AggOp
-    !(Maybe MySQLAggregationSetQuantifierSyntax)
-    MySQLAggregationExpressionSyntax
-  deriving stock (Eq, Show)
-
-instance IsSql92AggregationExpressionSyntax MySQLAggregationExpressionSyntax where
-  type Sql92AggregationSetQuantifierSyntax MySQLAggregationExpressionSyntax =
-    MySQLAggregationSetQuantifierSyntax
-  {-# INLINABLE countAllE #-}
-  countAllE = CountAll
-  {-# INLINABLE countE #-}
-  countE = Aggregation Count
-  {-# INLINABLE avgE #-}
-  avgE = Aggregation Avg
-  {-# INLINABLE sumE #-}
-  sumE = Aggregation Sum
-  {-# INLINABLE minE #-}
-  minE = Aggregation Min
-  {-# INLINABLE maxE #-}
-  maxE = Aggregation Max

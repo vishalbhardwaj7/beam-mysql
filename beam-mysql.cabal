@@ -29,6 +29,7 @@ common common-lang
   ghc-options:
     -Wall -Wcompat -Wincomplete-record-updates
     -Wincomplete-uni-patterns -Wredundant-constraints -Werror
+    -fplugin=RecordDotPreprocessor
 
   build-depends:
     , base                     >=4.13    && <5
@@ -96,9 +97,8 @@ library
     Database.Beam.MySQL.FromField
     Database.Beam.MySQL.Syntax
     Database.Beam.MySQL.Syntax.DataType
-    Database.Beam.MySQL.Syntax.Expression
     Database.Beam.MySQL.Syntax.Misc
-    Database.Beam.MySQL.Syntax.Projection
+    Database.Beam.MySQL.Syntax.Select
     Database.Beam.MySQL.Syntax.Value
     Database.Beam.MySQL.Utils
 
