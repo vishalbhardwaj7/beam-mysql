@@ -100,6 +100,7 @@ library
     Database.Beam.MySQL.Syntax.Delete
     Database.Beam.MySQL.Syntax.Insert
     Database.Beam.MySQL.Syntax.Misc
+    Database.Beam.MySQL.Syntax.Render
     Database.Beam.MySQL.Syntax.Select
     Database.Beam.MySQL.Syntax.Update
     Database.Beam.MySQL.Syntax.Value

@@ -1,13 +1,20 @@
 module Database.Beam.MySQL.Syntax.Value where
 
+import           Data.Bool (bool)
 import           Data.ByteString (ByteString)
+import           Data.Char (isLatin1)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Scientific (Scientific)
-import           Data.Text (Text)
-import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
+import           Data.Text (Text, foldl')
+import           Data.Time (Day, LocalTime, TimeOfDay)
+import qualified Data.Vector as V
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (HasSqlValueSyntax (sqlValueSyntax),
                                             SqlNull)
+import           Database.Beam.MySQL.Syntax.Render (RenderError (NotLatin1),
+                                                    RenderInto (renderPass),
+                                                    RenderResult (RenderResult))
+import           Database.MySQL.Base (MySQLValue (..), Param (One))
 
 data MySQLValueSyntax =
   VBool !Bool |
@@ -26,9 +33,43 @@ data MySQLValueSyntax =
   VText {-# UNPACK #-} !Text |
   VDay !Day |
   VLocalTime {-# UNPACK #-} !LocalTime |
-  VTimeOfDay {-# UNPACK #-} !TimeOfDay |
-  VNominalDiffTime !NominalDiffTime
+  VTimeOfDay {-# UNPACK #-} !TimeOfDay
   deriving stock (Eq, Show)
+
+instance RenderInto RenderError RenderResult MySQLValueSyntax where
+  {-# INLINABLE renderPass #-}
+  renderPass = \case
+    VBool b -> intoRenderResult (MySQLInt8 . bool 0 1) b
+    VInt8 i -> intoRenderResult MySQLInt8 i
+    VInt16 i -> intoRenderResult MySQLInt16 i
+    VInt32 i -> intoRenderResult MySQLInt32 i
+    VInt64 i -> intoRenderResult MySQLInt64 i
+    VWord8 w -> intoRenderResult MySQLInt8U w
+    VWord16 w -> intoRenderResult MySQLInt16U w
+    VWord32 w -> intoRenderResult MySQLInt32U w
+    VWord64 w -> intoRenderResult MySQLInt64U w
+    VScientific s -> intoRenderResult MySQLDecimal s
+    -- We can put NULLs straight in.
+    VNothing -> Right . RenderResult "NULL" mempty $ mempty
+    VNull -> Right . RenderResult "NULL" mempty $ mempty
+    VByteString b -> intoRenderResult MySQLBytes b
+    -- We have to do a Latin-1 encoding check here, due to current limitations
+    -- in our database. - Koz
+    VText t -> case foldl' go Nothing t of
+      -- Our text is Latin-1, so we're good.
+      Nothing -> intoRenderResult MySQLText t
+      -- Our text is _not_ Latin-1, so throw.
+      Just () -> Left (NotLatin1 t)
+      where
+        go :: Maybe () -> Char -> Maybe ()
+        go acc c = case acc of
+          Nothing -> if isLatin1 c
+                      then Nothing
+                      else Just ()
+          Just () -> Just ()
+    VDay d -> intoRenderResult MySQLDate d
+    VLocalTime lt -> intoRenderResult MySQLTimeStamp lt
+    VTimeOfDay tod -> intoRenderResult (MySQLTime 0) tod
 
 instance HasSqlValueSyntax MySQLValueSyntax Bool where
   {-# INLINABLE sqlValueSyntax #-}
@@ -109,6 +150,8 @@ instance HasSqlValueSyntax MySQLValueSyntax LocalTime where
   {-# INLINABLE sqlValueSyntax #-}
   sqlValueSyntax = VLocalTime
 
-instance HasSqlValueSyntax MySQLValueSyntax NominalDiffTime where
-  {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = VNominalDiffTime
+-- Helpers
+
+intoRenderResult :: (a -> MySQLValue) -> a -> Either e RenderResult
+intoRenderResult f x =
+  Right . RenderResult "?" (V.singleton . One . f $ x) $ mempty

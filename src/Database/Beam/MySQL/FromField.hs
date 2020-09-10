@@ -15,8 +15,7 @@ import           Data.Kind (Type)
 import           Data.Scientific (Scientific, toBoundedInteger)
 import           Data.Text (Text, pack, unpack)
 import           Data.Text.Encoding (encodeUtf8)
-import           Data.Time (Day, LocalTime (LocalTime), NominalDiffTime,
-                            TimeOfDay, daysAndTimeOfDayToTime, midnight)
+import           Data.Time (Day, LocalTime (LocalTime), TimeOfDay, midnight)
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (SqlNull (SqlNull))
 import           Database.MySQL.Base (MySQLValue (..))
@@ -363,20 +362,6 @@ instance FromField 'Strict TimeOfDay where
     v -> handleNullOrMismatch v
 
 instance FromField 'Lenient (L TimeOfDay) where
-  {-# INLINABLE fromField #-}
-  fromField = fmap L . relax . fromField
-
-instance FromField 'Strict NominalDiffTime where
-  {-# INLINABLE fromField #-}
-  fromField = \case
-    MySQLTime s v ->
-      let ndt = daysAndTimeOfDayToTime 0 v in
-        if s == zeroBits
-        then StrictParse ndt
-        else StrictParse . negate $ ndt
-    v -> handleNullOrMismatch v
-
-instance FromField 'Lenient (L NominalDiffTime) where
   {-# INLINABLE fromField #-}
   fromField = fmap L . relax . fromField
 
