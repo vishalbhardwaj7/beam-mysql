@@ -80,7 +80,7 @@ data MySQLSelectTableSyntax =
 
 instance IsSql92SelectTableSyntax MySQLSelectTableSyntax where
   type Sql92SelectTableSelectSyntax MySQLSelectTableSyntax =
-    MySQLSelectSyntax
+    MySQLSelect
   type Sql92SelectTableExpressionSyntax MySQLSelectTableSyntax =
     MySQLExpressionSyntax
   type Sql92SelectTableProjectionSyntax MySQLSelectTableSyntax =
@@ -280,15 +280,15 @@ data MySQLExpressionSyntax =
     } |
   Exists {
     ann    :: !ExpressionAnn,
-    select :: !MySQLSelectSyntax
+    select :: !MySQLSelect
     } |
   Unique {
     ann    :: !ExpressionAnn,
-    select :: !MySQLSelectSyntax
+    select :: !MySQLSelect
     } |
   Subquery {
     ann    :: !ExpressionAnn,
-    select :: !MySQLSelectSyntax
+    select :: !MySQLSelect
     } |
   CountAll {
     ann :: !ExpressionAnn
@@ -316,7 +316,7 @@ instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
   type Sql92ExpressionExtractFieldSyntax MySQLExpressionSyntax =
     MySQLExtractFieldSyntax
   type Sql92ExpressionSelectSyntax MySQLExpressionSyntax =
-    MySQLSelectSyntax
+    MySQLSelect
   {-# INLINABLE valueE #-}
   valueE = Placeholder . fromValues
   {-# INLINABLE rowE #-}
@@ -506,7 +506,7 @@ newtype TableRowExpression =
 
 data MySQLTableSourceSyntax =
   TableNamed !MySQLTableNameSyntax |
-  TableFromSubSelect !MySQLSelectSyntax |
+  TableFromSubSelect !MySQLSelect |
   TableFromValues {
     ann  :: !ExpressionAnn,
     rows :: {-# UNPACK #-} !(Vector TableRowExpression)
@@ -526,7 +526,7 @@ instance IsSql92TableSourceSyntax MySQLTableSourceSyntax where
   type Sql92TableSourceExpressionSyntax MySQLTableSourceSyntax =
     MySQLExpressionSyntax
   type Sql92TableSourceSelectSyntax MySQLTableSourceSyntax =
-    MySQLSelectSyntax
+    MySQLSelect
   {-# INLINABLE tableNamed #-}
   tableNamed = TableNamed
   {-# INLINABLE tableFromSubSelect #-}

@@ -2,10 +2,12 @@
 
 module Database.Beam.MySQL.Syntax where
 
+import           Database.Beam.MySQL.Syntax.Insert (MySQLInsert)
 import           Database.Beam.MySQL.Syntax.Select (MySQLSelect)
 
 data MySQLSyntax =
-  ASelect !MySQLSelect
+  ASelect MySQLSelect |
+  AnInsert MySQLInsert
   deriving stock (Eq, Show)
 
 {-
