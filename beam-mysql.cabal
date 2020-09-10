@@ -97,6 +97,7 @@ library
     Database.Beam.MySQL.FromField
     Database.Beam.MySQL.Syntax
     Database.Beam.MySQL.Syntax.DataType
+    Database.Beam.MySQL.Syntax.Delete
     Database.Beam.MySQL.Syntax.Insert
     Database.Beam.MySQL.Syntax.Misc
     Database.Beam.MySQL.Syntax.Select
