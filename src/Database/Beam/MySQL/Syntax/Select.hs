@@ -19,7 +19,8 @@ import           Database.Beam.Backend.SQL (IsSql92AggregationExpressionSyntax (
                                             IsSql92SelectSyntax (..),
                                             IsSql92SelectTableSyntax (..),
                                             IsSql92TableNameSyntax (..),
-                                            IsSql92TableSourceSyntax (..))
+                                            IsSql92TableSourceSyntax (..),
+                                            IsSql99ConcatExpressionSyntax (..))
 import           Database.Beam.MySQL.Syntax.DataType (MySQLDataTypeSyntax)
 import           Database.Beam.MySQL.Syntax.Misc (MySQLAggregationSetQuantifierSyntax,
                                                   MySQLExtractFieldSyntax,
@@ -298,6 +299,10 @@ data MySQLExpressionSyntax =
     aggregationOp :: !AggOp,
     setQuantifier :: !(Maybe MySQLAggregationSetQuantifierSyntax),
     expr          :: MySQLExpressionSyntax
+    } |
+  Concat {
+    ann   :: !ExpressionAnn,
+    exprs :: {-# UNPACK #-} !(Vector MySQLExpressionSyntax)
     }
   deriving stock (Eq, Show)
 
@@ -472,6 +477,10 @@ instance IsSql92AggregationExpressionSyntax MySQLExpressionSyntax where
   minE = makeAggregation Min
   {-# INLINABLE maxE #-}
   maxE = makeAggregation Max
+
+instance IsSql99ConcatExpressionSyntax MySQLExpressionSyntax where
+  {-# INLINABLE concatE #-}
+  concatE es = Concat (foldMap getAnn es) (fromList es)
 
 data MySQLProjectionSyntax = ProjectExpressions {
     ann         :: !ExpressionAnn,
