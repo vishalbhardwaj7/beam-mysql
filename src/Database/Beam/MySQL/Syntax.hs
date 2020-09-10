@@ -4,10 +4,12 @@ module Database.Beam.MySQL.Syntax where
 
 import           Database.Beam.MySQL.Syntax.Insert (MySQLInsert)
 import           Database.Beam.MySQL.Syntax.Select (MySQLSelect)
+import           Database.Beam.MySQL.Syntax.Update (MySQLUpdate)
 
 data MySQLSyntax =
   ASelect MySQLSelect |
-  AnInsert MySQLInsert
+  AnInsert MySQLInsert |
+  AnUpdate MySQLUpdate
   deriving stock (Eq, Show)
 
 {-
