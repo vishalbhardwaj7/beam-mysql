@@ -16,24 +16,26 @@ import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 defaultDbSettings)
 import qualified Database.Beam as B
 import           Database.Beam.MySQL (MySQL, runBeamMySQL)
+import           Database.Beam.MySQL (runInsertRowReturning)
 import           Database.Beam.Query (SqlSelect, select)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
 import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
 import           GHC.Generics (Generic)
-import           Test.Hspec (Spec, describe, hspec, it, shouldBe)
+import           Test.Hspec (Spec, describe, hspec, it, shouldReturn)
+
+type Correct = CorrectT Identity
 
 main :: IO ()
 main = do
-  res <- withTempDB go
-  hspec . spec $ res
+  hspec $ spec mkSpecWithConn
   where
-    go :: MySQLDB -> IO (CorrectT Identity)
-    go db = bracket (connect . toConnectInfo $ db)
+    mkSpecWithConn :: (MySQLConn -> IO Correct) -> IO (CorrectT Identity)
+    mkSpecWithConn runQuery = withTempDB $ \db
+      -> bracket (connect . toConnectInfo $ db)
                     close
                     (\conn -> setUpDB conn >>
-                              runCorrectQuery conn)
-
+                              runQuery conn)
 -- Helpers
 
 setUpDB :: MySQLConn -> IO ()
@@ -61,21 +63,50 @@ setUpDB conn = traverse_ (execute_ conn) [
       bobbyTablesBS <>
       ")"
 
-runCorrectQuery :: MySQLConn -> IO (CorrectT Identity)
-runCorrectQuery conn = do
+runSelectQuery :: MySQLConn -> IO (CorrectT Identity)
+runSelectQuery conn = do
   res <- runBeamMySQL conn . B.runSelectReturningList $ query
   case res of
-    []   -> fail "Expected query result, but got nothing."
-    res':_ -> do
-      -- print res
-      print $ _correctBadText res'
-      print $ _correctBadText2 res'
-      pure $ res'
+    []     -> fail "Expected query result, but got nothing."
+    res':_ -> pure $ res'
   where
     query :: SqlSelect MySQL (CorrectT Identity)
     query = select . B.limit_ 1 . B.filter_' predicate $ B.all_ (_testCorrectTable testDB)
       where predicate CorrectT {_correctBadText2} =
               _correctBadText2 B.==?. B.val_ bobbyTables
+
+runInsertQuery :: MySQLConn -> IO Correct
+runInsertQuery conn = do
+  runBeamMySQL conn . B.runInsert $ query
+  pure val
+  where
+    val = CorrectT 10 "hello" bobbyTables
+    query = B.insert (_testCorrectTable testDB)
+          $ B.insertExpressions [ (B.val_ val) ]
+
+runUpdateQuery :: MySQLConn -> IO Correct
+runUpdateQuery conn = do
+  runBeamMySQL conn . B.runUpdate
+                    $ B.update'
+                    (_testCorrectTable testDB)
+                    (\tbl -> _correctBadText tbl B.<-. (B.val_ bobbyTables))
+                    (\tbl ->  _correctBadText2 tbl B.==?. (B.val_ bobbyTables))
+  runSelectQuery conn
+
+runSaveQuery :: MySQLConn -> IO Correct
+runSaveQuery conn = do
+  runBeamMySQL conn . B.runUpdate
+                    $ B.save' (_testCorrectTable testDB) (CorrectT 1 "hello" bobbyTables)
+  runSelectQuery conn
+
+runInsertReturningQuery :: MySQLConn -> IO Correct
+runInsertReturningQuery conn =
+  runBeamMySQL conn (runInsertRowReturning query) >>= \case
+    Nothing -> fail "Couldn't insert value"
+    Just res -> pure res
+  where
+    query = B.insert (_testCorrectTable testDB)
+          $ B.insertExpressions [B.val_ (CorrectT 2 "hello" bobbyTables)]
 
 bobbyTables :: Text
 bobbyTables = "\'; DROP TABLE students; --"
@@ -83,11 +114,19 @@ bobbyTables = "\'; DROP TABLE students; --"
 bobbyTablesBS :: BSL.ByteString
 bobbyTablesBS = "\'\\'; DROP TABLE students; --\'"
 
-spec :: CorrectT Identity -> Spec
-spec res = do
-  describe "Escaping tests" $ do
-    it "shouldn't allow little Bobby Tables to drop students table" $ do
-      _correctBadText2 res `shouldBe` bobbyTables
+spec :: ((MySQLConn -> IO Correct) -> IO Correct) -> Spec
+spec mkSpec = do
+  describe "Text escaping should prevent little Bobby Tables from dropping the students table" $ do
+    it "via select . filter_" $ do
+      _correctBadText2 <$> (mkSpec runSelectQuery) `shouldReturn` bobbyTables
+    it "via insert" $ do
+      _correctBadText2 <$> (mkSpec runInsertQuery) `shouldReturn` bobbyTables
+    it "via update " $ do
+      _correctBadText2 <$> (mkSpec runUpdateQuery) `shouldReturn` bobbyTables
+    it "via save" $ do
+      _correctBadText2 <$> (mkSpec runSaveQuery) `shouldReturn` bobbyTables
+    it "via insertReturning" $ do
+      _correctBadText2 <$> (mkSpec runInsertReturningQuery) `shouldReturn` bobbyTables
 
 data CorrectT (f :: Type -> Type) = CorrectT
   {
