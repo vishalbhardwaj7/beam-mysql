@@ -12,8 +12,8 @@ import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (HasSqlValueSyntax (sqlValueSyntax),
                                             SqlNull)
 import           Database.Beam.MySQL.Syntax.Render (RenderError (NotLatin1),
-                                                    RenderInto (renderPass),
-                                                    RenderResult (RenderResult))
+                                                    RenderResult (RenderResult),
+                                                    Renderable (renderPass))
 import           Database.MySQL.Base (MySQLValue (..), Param (One))
 
 data MySQLValueSyntax =
@@ -36,7 +36,7 @@ data MySQLValueSyntax =
   VTimeOfDay {-# UNPACK #-} !TimeOfDay
   deriving stock (Eq, Show)
 
-instance RenderInto RenderError RenderResult MySQLValueSyntax where
+instance Renderable MySQLValueSyntax where
   {-# INLINABLE renderPass #-}
   renderPass = \case
     VBool b -> intoRenderResult (MySQLInt8 . bool 0 1) b
