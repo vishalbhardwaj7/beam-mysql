@@ -2,7 +2,7 @@
 
 ## 1.1.0.0
 
-* Removed `Aeson.Value`, `NominalDiffTime` instances of `FromField`
+* Removed `Aeson.Value`, `NominalDiffTime`, `Rational` instances of `FromField`
 * Added support for a lenient mode (see LENIENT.md)
 * Reintroduce `runInsertRowReturning`
 * Improve error messages
