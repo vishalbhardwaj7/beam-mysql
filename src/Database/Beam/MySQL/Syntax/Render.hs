@@ -2,12 +2,16 @@
 
 module Database.Beam.MySQL.Syntax.Render where
 
-import           Data.ByteString.Lazy (ByteString)
 import           Data.HashSet (HashSet)
 import           Data.Kind (Type)
 import           Data.Text (Text)
 import           Data.Vector (Vector)
-import           Database.MySQL.Base (Param)
+import           Database.Beam.MySQL.Syntax.Delete (MySQLDelete)
+import           Database.Beam.MySQL.Syntax.Insert (MySQLInsert)
+import           Database.Beam.MySQL.Syntax.Select (MySQLSelect)
+import           Database.Beam.MySQL.Syntax.Update (MySQLUpdate)
+import           Database.MySQL.Base (Param, Query)
+import           Fmt (Builder)
 
 data RenderError =
   NotLatin1 {-# UNPACK #-} !Text |
@@ -19,13 +23,19 @@ data RenderError =
 
 data RenderResult = RenderResult
   {
-    queryFragment :: !ByteString,
+    queryFragment :: {-# UNPACK #-} !Builder,
     parameters    :: {-# UNPACK #-} !(Vector Param),
     tables        :: !(HashSet Text)
   }
 
-class Renderable (a :: Type) where
-  renderPass :: a -> Either RenderError RenderResult
+renderSelect :: MySQLSelect -> Either RenderError (HashSet Text, Query)
+renderSelect = _
 
-contextFreeRender :: (a -> ByteString) -> a -> Either RenderError RenderResult
-contextFreeRender f x = Right . RenderResult (f x) mempty $ mempty
+renderInsert :: MySQLInsert -> Either RenderError (HashSet Text, Query)
+renderInsert = _
+
+renderUpdate :: MySQLInsert -> Either RenderError (HashSet Text, Query)
+renderUpdate = _
+
+renderDelete :: MySQLDelete -> Either RenderError (HashSet Text, Query)
+renderDelete = _

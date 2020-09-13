@@ -11,14 +11,14 @@ import           Database.Beam.MySQL.Syntax.Select (ExpressionAnn,
                                                     getAnn)
 
 data FieldUpdate = FieldUpdate {
-  fieldName       :: MySQLFieldNameSyntax,
-  fieldExpression :: MySQLExpressionSyntax
+  fieldName       :: {-# UNPACK #-} !MySQLFieldNameSyntax,
+  fieldExpression :: !MySQLExpressionSyntax
   }
   deriving stock (Eq, Show)
 
 data MySQLUpdate = UpdateStmt {
   ann       :: !ExpressionAnn,
-  tableName :: MySQLTableNameSyntax,
+  tableName :: {-# UNPACK #-} !MySQLTableNameSyntax,
   updates   :: {-# UNPACK #-} !(Vector FieldUpdate),
   wher      :: !(Maybe MySQLExpressionSyntax)
   }
@@ -32,6 +32,11 @@ instance IsSql92UpdateSyntax MySQLUpdate where
   type Sql92UpdateTableNameSyntax MySQLUpdate =
     MySQLTableNameSyntax
   {-# INLINABLE updateStmt #-}
+  updateStmt ::
+    MySQLTableNameSyntax ->
+    [(MySQLFieldNameSyntax, MySQLExpressionSyntax)] ->
+    Maybe MySQLExpressionSyntax ->
+    MySQLUpdate
   updateStmt tableName' updates' wher' =
     UpdateStmt ann'
                tableName'

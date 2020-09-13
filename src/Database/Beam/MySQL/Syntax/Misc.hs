@@ -22,8 +22,10 @@ data MySQLFieldNameSyntax =
 
 instance IsSql92FieldNameSyntax MySQLFieldNameSyntax where
   {-# INLINABLE qualifiedField #-}
+  qualifiedField :: Text -> Text -> MySQLFieldNameSyntax
   qualifiedField = QualifiedField
   {-# INLINABLE unqualifiedField #-}
+  unqualifiedField :: Text -> MySQLFieldNameSyntax
   unqualifiedField = UnqualifiedField
 
 data MySQLQuantifierSyntax = All | Any
@@ -31,8 +33,10 @@ data MySQLQuantifierSyntax = All | Any
 
 instance IsSql92QuantifierSyntax MySQLQuantifierSyntax where
   {-# INLINABLE quantifyOverAll #-}
+  quantifyOverAll :: MySQLQuantifierSyntax
   quantifyOverAll = All
   {-# INLINABLE quantifyOverAny #-}
+  quantifyOverAny :: MySQLQuantifierSyntax
   quantifyOverAny = Any
 
 data MySQLExtractFieldSyntax =
@@ -46,16 +50,22 @@ data MySQLExtractFieldSyntax =
 
 instance IsSql92ExtractFieldSyntax MySQLExtractFieldSyntax where
   {-# INLINABLE secondsField #-}
+  secondsField :: MySQLExtractFieldSyntax
   secondsField = SecondsField
   {-# INLINABLE minutesField #-}
+  minutesField :: MySQLExtractFieldSyntax
   minutesField = MinutesField
   {-# INLINABLE hourField #-}
+  hourField :: MySQLExtractFieldSyntax
   hourField = HourField
   {-# INLINABLE dayField #-}
+  dayField :: MySQLExtractFieldSyntax
   dayField = DayField
   {-# INLINABLE monthField #-}
+  monthField :: MySQLExtractFieldSyntax
   monthField = MonthField
   {-# INLINABLE yearField #-}
+  yearField :: MySQLExtractFieldSyntax
   yearField = YearField
 
 data MySQLAggregationSetQuantifierSyntax =
@@ -65,6 +75,8 @@ data MySQLAggregationSetQuantifierSyntax =
 
 instance IsSql92AggregationSetQuantifierSyntax MySQLAggregationSetQuantifierSyntax where
   {-# INLINABLE setQuantifierDistinct #-}
+  setQuantifierDistinct :: MySQLAggregationSetQuantifierSyntax
   setQuantifierDistinct = SetDistinct
   {-# INLINABLE setQuantifierAll #-}
+  setQuantifierAll :: MySQLAggregationSetQuantifierSyntax
   setQuantifierAll = SetAll

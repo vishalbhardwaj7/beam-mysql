@@ -32,15 +32,17 @@ instance IsSql92InsertValuesSyntax MySQLInsertValuesSyntax where
   type Sql92InsertValuesSelectSyntax MySQLInsertValuesSyntax =
     MySQLSelect
   {-# INLINABLE insertSqlExpressions #-}
+  insertSqlExpressions :: [[MySQLExpressionSyntax]] -> MySQLInsertValuesSyntax
   insertSqlExpressions rows =
     InsertSQLExpressions (foldMap (foldMap getAnn) rows)
-                        (fromList . fmap (TableRowExpression . fromList) $ rows)
+                         (fromList . fmap (TableRowExpression . fromList) $ rows)
   {-# INLINABLE insertFromSql #-}
+  insertFromSql :: MySQLSelect -> MySQLInsertValuesSyntax
   insertFromSql sel = InsertFromSQL sel.ann sel
 
 data MySQLInsert = InsertStmt {
   ann          :: !ExpressionAnn,
-  tableName    :: MySQLTableNameSyntax,
+  tableName    :: {-# UNPACK #-} !MySQLTableNameSyntax,
   columns      :: {-# UNPACK #-} !(Vector Text),
   insertValues :: MySQLInsertValuesSyntax
   }
@@ -52,6 +54,11 @@ instance IsSql92InsertSyntax MySQLInsert where
   type Sql92InsertTableNameSyntax MySQLInsert =
     MySQLTableNameSyntax
   {-# INLINABLE insertStmt #-}
+  insertStmt ::
+    MySQLTableNameSyntax ->
+    [Text] ->
+    MySQLInsertValuesSyntax ->
+    MySQLInsert
   insertStmt tableName' columns' insertValues' =
     InsertStmt insertValues'.ann
                tableName'

@@ -1,20 +1,13 @@
 module Database.Beam.MySQL.Syntax.Value where
 
-import           Data.Bool (bool)
 import           Data.ByteString (ByteString)
-import           Data.Char (isLatin1)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Scientific (Scientific)
-import           Data.Text (Text, foldl')
+import           Data.Text (Text)
 import           Data.Time (Day, LocalTime, TimeOfDay)
-import qualified Data.Vector as V
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (HasSqlValueSyntax (sqlValueSyntax),
                                             SqlNull)
-import           Database.Beam.MySQL.Syntax.Render (RenderError (NotLatin1),
-                                                    RenderResult (RenderResult),
-                                                    Renderable (renderPass))
-import           Database.MySQL.Base (MySQLValue (..), Param (One))
 
 data MySQLValueSyntax =
   VBool !Bool |
@@ -36,122 +29,98 @@ data MySQLValueSyntax =
   VTimeOfDay {-# UNPACK #-} !TimeOfDay
   deriving stock (Eq, Show)
 
-instance Renderable MySQLValueSyntax where
-  {-# INLINABLE renderPass #-}
-  renderPass = \case
-    VBool b -> intoRenderResult (MySQLInt8 . bool 0 1) b
-    VInt8 i -> intoRenderResult MySQLInt8 i
-    VInt16 i -> intoRenderResult MySQLInt16 i
-    VInt32 i -> intoRenderResult MySQLInt32 i
-    VInt64 i -> intoRenderResult MySQLInt64 i
-    VWord8 w -> intoRenderResult MySQLInt8U w
-    VWord16 w -> intoRenderResult MySQLInt16U w
-    VWord32 w -> intoRenderResult MySQLInt32U w
-    VWord64 w -> intoRenderResult MySQLInt64U w
-    VScientific s -> intoRenderResult MySQLDecimal s
-    -- We can put NULLs straight in.
-    VNothing -> Right . RenderResult "NULL" mempty $ mempty
-    VNull -> Right . RenderResult "NULL" mempty $ mempty
-    VByteString b -> intoRenderResult MySQLBytes b
-    -- We have to do a Latin-1 encoding check here, due to current limitations
-    -- in our database. - Koz
-    VText t -> case foldl' go Nothing t of
-      -- Our text is Latin-1, so we're good.
-      Nothing -> intoRenderResult MySQLText t
-      -- Our text is _not_ Latin-1, so throw.
-      Just () -> Left (NotLatin1 t)
-      where
-        go :: Maybe () -> Char -> Maybe ()
-        go acc c = case acc of
-          Nothing -> if isLatin1 c
-                      then Nothing
-                      else Just ()
-          Just () -> Just ()
-    VDay d -> intoRenderResult MySQLDate d
-    VLocalTime lt -> intoRenderResult MySQLTimeStamp lt
-    VTimeOfDay tod -> intoRenderResult (MySQLTime 0) tod
-
 instance HasSqlValueSyntax MySQLValueSyntax Bool where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Bool -> MySQLValueSyntax
   sqlValueSyntax = VBool
 
 instance HasSqlValueSyntax MySQLValueSyntax Int8 where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Int8 -> MySQLValueSyntax
   sqlValueSyntax = VInt8
 
 instance HasSqlValueSyntax MySQLValueSyntax Int16 where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Int16 -> MySQLValueSyntax
   sqlValueSyntax = VInt16
 
 instance HasSqlValueSyntax MySQLValueSyntax Int32 where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Int32 -> MySQLValueSyntax
   sqlValueSyntax = VInt32
 
 instance HasSqlValueSyntax MySQLValueSyntax Int64 where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Int64 -> MySQLValueSyntax
   sqlValueSyntax = VInt64
 
 instance HasSqlValueSyntax MySQLValueSyntax Int where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Int -> MySQLValueSyntax
   sqlValueSyntax = VInt64 . fromIntegral
 
 instance HasSqlValueSyntax MySQLValueSyntax Word8 where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Word8 -> MySQLValueSyntax
   sqlValueSyntax = VWord8
 
 instance HasSqlValueSyntax MySQLValueSyntax Word16 where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Word16 -> MySQLValueSyntax
   sqlValueSyntax = VWord16
 
 instance HasSqlValueSyntax MySQLValueSyntax Word32 where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Word32 -> MySQLValueSyntax
   sqlValueSyntax = VWord32
 
 instance HasSqlValueSyntax MySQLValueSyntax Word64 where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Word64 -> MySQLValueSyntax
   sqlValueSyntax = VWord64
 
 instance HasSqlValueSyntax MySQLValueSyntax Word where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Word -> MySQLValueSyntax
   sqlValueSyntax = VWord64 . fromIntegral
 
 instance HasSqlValueSyntax MySQLValueSyntax Scientific where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Scientific -> MySQLValueSyntax
   sqlValueSyntax = VScientific
 
 instance (HasSqlValueSyntax MySQLValueSyntax a) =>
   HasSqlValueSyntax MySQLValueSyntax (Maybe a) where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax = \case
-    Nothing -> VNothing
-    Just x -> sqlValueSyntax x
+  sqlValueSyntax :: Maybe a -> MySQLValueSyntax
+  sqlValueSyntax = maybe VNothing sqlValueSyntax
 
 instance HasSqlValueSyntax MySQLValueSyntax SqlNull where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: SqlNull -> MySQLValueSyntax
   sqlValueSyntax = const VNull
 
 instance HasSqlValueSyntax MySQLValueSyntax ByteString where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: ByteString -> MySQLValueSyntax
   sqlValueSyntax = VByteString
 
 instance HasSqlValueSyntax MySQLValueSyntax Text where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Text -> MySQLValueSyntax
   sqlValueSyntax = VText
 
 instance HasSqlValueSyntax MySQLValueSyntax Day where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Day -> MySQLValueSyntax
   sqlValueSyntax = VDay
 
 instance HasSqlValueSyntax MySQLValueSyntax TimeOfDay where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: TimeOfDay -> MySQLValueSyntax
   sqlValueSyntax = VTimeOfDay
 
 instance HasSqlValueSyntax MySQLValueSyntax LocalTime where
   {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: LocalTime -> MySQLValueSyntax
   sqlValueSyntax = VLocalTime
-
--- Helpers
-
-intoRenderResult :: (a -> MySQLValue) -> a -> Either e RenderResult
-intoRenderResult f x =
-  Right . RenderResult "?" (V.singleton . One . f $ x) $ mempty

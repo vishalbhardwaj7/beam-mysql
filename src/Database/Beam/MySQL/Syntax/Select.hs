@@ -1,15 +1,13 @@
 -- Due to RDP plugin.
 {-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
-{-# LANGUAGE QuasiQuotes     #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeFamilies    #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Database.Beam.MySQL.Syntax.Select where
 
 import           Data.HashSet (HashSet)
 import qualified Data.HashSet as HS
 import           Data.Text (Text)
-import           Data.Vector (Vector, foldl', foldl1', fromList, map, singleton)
+import           Data.Vector (Vector, fromList, singleton)
 import           Database.Beam.Backend.SQL (IsSql92AggregationExpressionSyntax (..),
                                             IsSql92ExpressionSyntax (..),
                                             IsSql92FromSyntax (..),
@@ -27,10 +25,7 @@ import           Database.Beam.MySQL.Syntax.Misc (MySQLAggregationSetQuantifierS
                                                   MySQLFieldNameSyntax (QualifiedField, UnqualifiedField),
                                                   MySQLQuantifierSyntax)
 import           Database.Beam.MySQL.Syntax.Value (MySQLValueSyntax)
-import qualified Language.C.Inline as C
 import           Prelude hiding (map)
-
-C.include "<mysql/mysql.h>"
 
 data MySQLOrderingSyntax =
   AscOrdering {
@@ -47,8 +42,10 @@ instance IsSql92OrderingSyntax MySQLOrderingSyntax where
   type Sql92OrderingExpressionSyntax MySQLOrderingSyntax =
     MySQLExpressionSyntax
   {-# INLINABLE ascOrdering #-}
+  ascOrdering :: MySQLExpressionSyntax -> MySQLOrderingSyntax
   ascOrdering e = AscOrdering (getAnn e) e
   {-# INLINABLE descOrdering #-}
+  descOrdering :: MySQLExpressionSyntax -> MySQLOrderingSyntax
   descOrdering e = DescOrdering (getAnn e) e
 
 data MySQLSelectTableSyntax =
@@ -61,9 +58,13 @@ data MySQLSelectTableSyntax =
     grouping   :: !(Maybe MySQLGroupingSyntax),
     having     :: !(Maybe MySQLExpressionSyntax)
     } |
-  UnionTables {
+  UnionTablesAll {
     ann    :: !ExpressionAnn,
-    isAll  :: !Bool,
+    lTable :: MySQLSelectTableSyntax,
+    rTable :: MySQLSelectTableSyntax
+    } |
+  UnionTablesDistinct {
+    ann    :: !ExpressionAnn,
     lTable :: MySQLSelectTableSyntax,
     rTable :: MySQLSelectTableSyntax
     } |
@@ -93,6 +94,14 @@ instance IsSql92SelectTableSyntax MySQLSelectTableSyntax where
   type Sql92SelectTableSetQuantifierSyntax MySQLSelectTableSyntax =
     MySQLAggregationSetQuantifierSyntax
   {-# INLINABLE selectTableStmt #-}
+  selectTableStmt ::
+    Maybe MySQLAggregationSetQuantifierSyntax ->
+    MySQLProjectionSyntax ->
+    Maybe MySQLFromSyntax ->
+    Maybe MySQLExpressionSyntax ->
+    Maybe MySQLGroupingSyntax ->
+    Maybe MySQLExpressionSyntax ->
+    MySQLSelectTableSyntax
   selectTableStmt quant proj from' wher' grouping' having' =
     SelectTableStatement ann' quant proj from' wher' grouping' having'
     where
@@ -104,12 +113,28 @@ instance IsSql92SelectTableSyntax MySQLSelectTableSyntax where
         foldMap (.ann) grouping' <>
         foldMap getAnn having'
   {-# INLINABLE unionTables #-}
-  unionTables isAll' lOp rOp =
-    UnionTables (lOp.ann <> rOp.ann) isAll' lOp rOp
+  unionTables ::
+    Bool ->
+    MySQLSelectTableSyntax ->
+    MySQLSelectTableSyntax ->
+    MySQLSelectTableSyntax
+  unionTables isAll lOp rOp = if isAll
+    then UnionTablesAll (lOp.ann <> rOp.ann) lOp rOp
+    else UnionTablesDistinct (lOp.ann <> rOp.ann) lOp rOp
   {-# INLINABLE intersectTables #-}
+  intersectTables ::
+    Bool ->
+    MySQLSelectTableSyntax ->
+    MySQLSelectTableSyntax ->
+    MySQLSelectTableSyntax
   intersectTables _ lOp rOp =
     IntersectTables (lOp.ann <> rOp.ann) lOp rOp
   {-# INLINABLE exceptTable #-}
+  exceptTable ::
+    Bool ->
+    MySQLSelectTableSyntax ->
+    MySQLSelectTableSyntax ->
+    MySQLSelectTableSyntax
   exceptTable _ lOp rOp =
     ExceptTable (lOp.ann <> rOp.ann) lOp rOp
 
@@ -139,11 +164,8 @@ instance Semigroup ExpressionAnn where
 instance Monoid ExpressionAnn where
   mempty = ExpressionAnn mempty mempty mempty
 
-foldAnn :: Vector ExpressionAnn -> ExpressionAnn
-foldAnn = foldl1' (<>)
-
-fromValues :: MySQLValueSyntax -> ExpressionAnn
-fromValues p = ExpressionAnn Pure (singleton p) mempty
+fromValue :: MySQLValueSyntax -> ExpressionAnn
+fromValue p = ExpressionAnn Pure (singleton p) mempty
 
 data BinOp =
   LAnd |
@@ -197,6 +219,12 @@ data AggOp =
   Max
   deriving stock (Eq, Show)
 
+data CaseBranch = CaseBranch {
+  condition :: !MySQLExpressionSyntax,
+  action    :: !MySQLExpressionSyntax
+  }
+  deriving stock (Eq, Show)
+
 data MySQLExpressionSyntax =
   Placeholder {
     ann :: !ExpressionAnn
@@ -210,9 +238,8 @@ data MySQLExpressionSyntax =
     exprs :: {-# UNPACK #-} !(Vector MySQLExpressionSyntax)
     } |
   Case {
-    ann :: !ExpressionAnn,
-    cases ::
-      {-# UNPACK #-} !(Vector (MySQLExpressionSyntax, MySQLExpressionSyntax)),
+    ann         :: !ExpressionAnn,
+    cases       :: {-# UNPACK #-} !(Vector CaseBranch),
     defaultCase :: MySQLExpressionSyntax
     } |
   Field {
@@ -281,11 +308,11 @@ data MySQLExpressionSyntax =
     } |
   Exists {
     ann    :: !ExpressionAnn,
-    select :: !MySQLSelect
+    select :: MySQLSelect
     } |
   Unique {
     ann    :: !ExpressionAnn,
-    select :: !MySQLSelect
+    select :: MySQLSelect
     } |
   Subquery {
     ann    :: !ExpressionAnn,
@@ -323,111 +350,260 @@ instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
   type Sql92ExpressionSelectSyntax MySQLExpressionSyntax =
     MySQLSelect
   {-# INLINABLE valueE #-}
-  valueE = Placeholder . fromValues
+  valueE :: MySQLValueSyntax -> MySQLExpressionSyntax
+  valueE = Placeholder . fromValue
   {-# INLINABLE rowE #-}
-  rowE = (\v -> Row (foldAnn . map getAnn $ v) v) . fromList
+  rowE :: [MySQLExpressionSyntax] -> MySQLExpressionSyntax
+  rowE es = Row (foldMap getAnn es) (fromList es)
   {-# INLINABLE coalesceE #-}
-  coalesceE = (\v -> Coalesce (foldAnn . map getAnn $ v) v) . fromList
+  coalesceE :: [MySQLExpressionSyntax] -> MySQLExpressionSyntax
+  coalesceE es = Coalesce (foldMap getAnn es) (fromList es)
   {-# INLINABLE caseE #-}
-  caseE cases' def = Case ann' casesV def
+  caseE ::
+    [(MySQLExpressionSyntax, MySQLExpressionSyntax)] ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
+  caseE cases' def =
+    Case (foldMap go cases' <> getAnn def)
+         (fromList . fmap (uncurry CaseBranch) $ cases')
+         def
     where
-      casesV :: Vector (MySQLExpressionSyntax, MySQLExpressionSyntax)
-      casesV = fromList cases'
-      ann' :: ExpressionAnn
-      ann' = foldl' go (getAnn def) casesV
       go ::
-        ExpressionAnn ->
         (MySQLExpressionSyntax, MySQLExpressionSyntax) ->
         ExpressionAnn
-      go ann'' (e1, e2) = ann'' <> getAnn e1 <> getAnn e2
+      go (cond, act) = getAnn cond <> getAnn act
   {-# INLINABLE fieldE #-}
-  fieldE = \case
-    f@(QualifiedField nam _) ->
-      Field (ExpressionAnn Impure mempty (HS.singleton nam)) f
-    f@(UnqualifiedField _) ->
-      Field (ExpressionAnn Impure mempty mempty) f
+  fieldE :: MySQLFieldNameSyntax -> MySQLExpressionSyntax
+  fieldE f = Field go f
+    where
+      go :: ExpressionAnn
+      go = ExpressionAnn Impure mempty $ case f of
+        QualifiedField nam _ -> HS.singleton nam
+        UnqualifiedField _   -> mempty
   {-# INLINABLE andE #-}
+  andE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   andE = makeBinOp LAnd
   {-# INLINABLE orE #-}
+  orE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   orE = makeBinOp LOr
   {-# INLINABLE addE #-}
+  addE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   addE = makeBinOp NAdd
   {-# INLINABLE mulE #-}
+  mulE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   mulE = makeBinOp NMul
   {-# INLINABLE subE #-}
+  subE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   subE = makeBinOp NSub
   {-# INLINABLE divE #-}
+  divE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   divE = makeBinOp NDiv
   {-# INLINABLE likeE #-}
+  likeE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   likeE = makeBinOp GLike
   {-# INLINABLE modE #-}
+  modE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   modE = makeBinOp NMod
   {-# INLINABLE overlapsE #-}
+  overlapsE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   overlapsE = makeBinOp GOverlaps
   {-# INLINABLE nullIfE #-}
+  nullIfE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   nullIfE l r = NullIf (getAnn l <> getAnn r) l r
   {-# INLINABLE positionE #-}
+  positionE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   positionE needle' haystack' =
     Position (getAnn needle' <> getAnn haystack') needle' haystack'
   {-# INLINABLE eqE #-}
+  eqE ::
+    Maybe MySQLQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   eqE = makeCompOp CEq
   {-# INLINABLE neqE #-}
+  neqE ::
+    Maybe MySQLQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   neqE = makeCompOp CNe
   {-# INLINABLE ltE #-}
+  ltE ::
+    Maybe MySQLQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   ltE = makeCompOp CLt
   {-# INLINABLE gtE #-}
+  gtE ::
+    Maybe MySQLQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   gtE = makeCompOp CGt
   {-# INLINABLE leE #-}
+  leE ::
+    Maybe MySQLQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   leE = makeCompOp CLe
   {-# INLINABLE geE #-}
+  geE ::
+    Maybe MySQLQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   geE = makeCompOp CGe
   {-# INLINABLE castE #-}
+  castE ::
+    MySQLExpressionSyntax ->
+    MySQLDataTypeSyntax ->
+    MySQLExpressionSyntax
   castE e dt = Cast (getAnn e) dt e
   {-# INLINABLE notE #-}
+  notE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   notE = makePrefixOp LNot
   {-# INLINABLE negateE #-}
+  negateE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   negateE = makePrefixOp NNegate
   {-# INLINABLE isNullE #-}
+  isNullE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   isNullE = makePostfixOp GIsNull
   {-# INLINABLE isNotNullE #-}
+  isNotNullE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   isNotNullE = makePostfixOp GIsNotNull
   {-# INLINABLE isTrueE #-}
+  isTrueE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   isTrueE = makePostfixOp GIsTrue
   {-# INLINABLE isNotTrueE #-}
+  isNotTrueE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   isNotTrueE = makePostfixOp GIsNotTrue
   {-# INLINABLE isFalseE #-}
+  isFalseE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   isFalseE = makePostfixOp GIsFalse
   {-# INLINABLE isNotFalseE #-}
+  isNotFalseE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   isNotFalseE = makePostfixOp GIsNotFalse
   {-# INLINABLE isUnknownE #-}
+  isUnknownE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   isUnknownE = makePostfixOp GIsUnknown
   {-# INLINABLE isNotUnknownE #-}
+  isNotUnknownE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   isNotUnknownE = makePostfixOp GIsNotUnknown
   {-# INLINABLE charLengthE #-}
+  charLengthE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   charLengthE = makePrefixOp TCharLength
   {-# INLINABLE octetLengthE #-}
+  octetLengthE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   octetLengthE = makePrefixOp TOctetLength
   {-# INLINABLE bitLengthE #-}
+  bitLengthE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   bitLengthE = makePrefixOp BBitLength
   {-# INLINABLE lowerE #-}
+  lowerE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   lowerE = makePrefixOp TLower
   {-# INLINABLE upperE #-}
+  upperE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   upperE = makePrefixOp TUpper
   {-# INLINABLE trimE #-}
+  trimE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   trimE = makePrefixOp TTrim
   {-# INLINABLE absE #-}
+  absE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   absE = makePrefixOp NAbs
   {-# INLINABLE extractE #-}
+  extractE ::
+    MySQLExtractFieldSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   extractE field' from' = Extract (getAnn from') field' from'
   {-# INLINABLE existsE #-}
+  existsE :: MySQLSelect -> MySQLExpressionSyntax
   existsE sel = Exists sel.ann sel
   {-# INLINABLE uniqueE #-}
+  uniqueE :: MySQLSelect -> MySQLExpressionSyntax
   uniqueE sel = Unique sel.ann sel
   {-# INLINABLE subqueryE #-}
+  subqueryE :: MySQLSelect -> MySQLExpressionSyntax
   subqueryE sel = Subquery sel.ann sel
   {-# INLINABLE currentTimestampE #-}
+  currentTimestampE :: MySQLExpressionSyntax
   currentTimestampE = CurrentTimestamp (ExpressionAnn Impure mempty mempty)
   {-# INLINABLE defaultE #-}
+  defaultE :: MySQLExpressionSyntax
+  -- TODO: Check this ourselves in runInsertRowReturning. - Koz
+  -- Note left below for posterity.
+  defaultE = Default (ExpressionAnn Impure mempty mempty)
+  {-
   defaultE = Default (ExpressionAnn go mempty mempty)
     where
       -- Prior to MySQL 8.0.13, DEFAULTs could only be constant expressions,
@@ -447,18 +623,26 @@ instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
       --
       -- TODO: Ensure we check for the CURRENT_TIMESTAMP case in
       -- insertRowReturning for safety. - Koz
+      --
+      -- TODO: Perhaps it might be better to be impure always, then check our
+      -- special case differently in insertRowReturning? - Koz
       go :: Purity
       go = if [C.pure| int { MYSQL_VERSION_ID } |] >= 80013
             then Impure
             else Pure
+  -}
   {-# INLINABLE inE #-}
-  inE e es = In ann' e esV
-    where
-      ann' :: ExpressionAnn
-      ann' = foldl' (\acc e' -> acc <> getAnn e') (getAnn e) esV
-      esV :: Vector MySQLExpressionSyntax
-      esV = fromList es
+  inE ::
+    MySQLExpressionSyntax ->
+    [MySQLExpressionSyntax] ->
+    MySQLExpressionSyntax
+  inE e es = In (getAnn e <> foldMap getAnn es) e (fromList es)
   {-# INLINABLE betweenE #-}
+  betweenE ::
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   betweenE arg lo' hi' =
     Between (getAnn arg <> getAnn lo' <> getAnn hi') arg lo' hi'
 
@@ -466,25 +650,52 @@ instance IsSql92AggregationExpressionSyntax MySQLExpressionSyntax where
   type Sql92AggregationSetQuantifierSyntax MySQLExpressionSyntax =
     MySQLAggregationSetQuantifierSyntax
   {-# INLINABLE countAllE #-}
+  countAllE :: MySQLExpressionSyntax
   countAllE = CountAll mempty
   {-# INLINABLE countE #-}
+  countE ::
+    Maybe MySQLAggregationSetQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   countE = makeAggregation Count
   {-# INLINABLE avgE #-}
+  avgE ::
+    Maybe MySQLAggregationSetQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   avgE = makeAggregation Avg
   {-# INLINABLE sumE #-}
+  sumE ::
+    Maybe MySQLAggregationSetQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   sumE = makeAggregation Sum
   {-# INLINABLE minE #-}
+  minE ::
+    Maybe MySQLAggregationSetQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   minE = makeAggregation Min
   {-# INLINABLE maxE #-}
+  maxE ::
+    Maybe MySQLAggregationSetQuantifierSyntax ->
+    MySQLExpressionSyntax ->
+    MySQLExpressionSyntax
   maxE = makeAggregation Max
 
 instance IsSql99ConcatExpressionSyntax MySQLExpressionSyntax where
   {-# INLINABLE concatE #-}
   concatE es = Concat (foldMap getAnn es) (fromList es)
 
+data Projection = Projection {
+  expr  :: !MySQLExpressionSyntax,
+  label :: !(Maybe Text)
+  }
+  deriving stock (Eq, Show)
+
 data MySQLProjectionSyntax = ProjectExpressions {
     ann         :: !ExpressionAnn,
-    projections :: {-# UNPACK #-} !(Vector (MySQLExpressionSyntax, Maybe Text))
+    projections :: {-# UNPACK #-} !(Vector Projection)
   }
   deriving stock (Show, Eq)
 
@@ -492,12 +703,12 @@ instance IsSql92ProjectionSyntax MySQLProjectionSyntax where
   type Sql92ProjectionExpressionSyntax MySQLProjectionSyntax =
     MySQLExpressionSyntax
   {-# INLINABLE projExprs #-}
-  projExprs es = ProjectExpressions go esV
-    where
-      go :: ExpressionAnn
-      go = foldMap (getAnn . fst) esV
-      esV :: Vector (MySQLExpressionSyntax, Maybe Text)
-      esV = fromList es
+  projExprs ::
+    [(MySQLExpressionSyntax, Maybe Text)] ->
+    MySQLProjectionSyntax
+  projExprs es =
+    ProjectExpressions (foldMap (getAnn . fst) es)
+                       (fromList . fmap (uncurry Projection) $ es)
 
 data MySQLTableNameSyntax = TableName {
   schema :: !(Maybe Text),
@@ -507,6 +718,7 @@ data MySQLTableNameSyntax = TableName {
 
 instance IsSql92TableNameSyntax MySQLTableNameSyntax where
   {-# INLINABLE tableName #-}
+  tableName :: Maybe Text -> Text -> MySQLTableNameSyntax
   tableName = TableName
 
 newtype TableRowExpression =
@@ -515,7 +727,7 @@ newtype TableRowExpression =
 
 data MySQLTableSourceSyntax =
   TableNamed !MySQLTableNameSyntax |
-  TableFromSubSelect !MySQLSelect |
+  TableFromSubSelect MySQLSelect |
   TableFromValues {
     ann  :: !ExpressionAnn,
     rows :: {-# UNPACK #-} !(Vector TableRowExpression)
@@ -537,10 +749,13 @@ instance IsSql92TableSourceSyntax MySQLTableSourceSyntax where
   type Sql92TableSourceSelectSyntax MySQLTableSourceSyntax =
     MySQLSelect
   {-# INLINABLE tableNamed #-}
+  tableNamed :: MySQLTableNameSyntax -> MySQLTableSourceSyntax
   tableNamed = TableNamed
   {-# INLINABLE tableFromSubSelect #-}
+  tableFromSubSelect :: MySQLSelect -> MySQLTableSourceSyntax
   tableFromSubSelect = TableFromSubSelect
   {-# INLINABLE tableFromValues #-}
+  tableFromValues :: [[MySQLExpressionSyntax]] -> MySQLTableSourceSyntax
   tableFromValues rows' =
     TableFromValues (foldMap (foldMap getAnn) rows')
                     (fromList . fmap (TableRowExpression . fromList) $ rows')
@@ -597,18 +812,37 @@ instance IsSql92FromSyntax MySQLFromSyntax where
   type Sql92FromExpressionSyntax MySQLFromSyntax =
     MySQLExpressionSyntax
   {-# INLINABLE fromTable #-}
+  fromTable ::
+    MySQLTableSourceSyntax ->
+    Maybe (Text, Maybe [Text]) ->
+    MySQLFromSyntax
   fromTable tableSource' mHead = FromTable tableSource' $ case mHead of
     Nothing -> Anonymous
     Just (nam, mCols) -> case mCols of
       Nothing       -> TableNameOnly nam
       Just colNames -> TableAndColumns nam . fromList $ colNames
   {-# INLINABLE innerJoin #-}
+  innerJoin ::
+    MySQLFromSyntax ->
+    MySQLFromSyntax ->
+    Maybe MySQLExpressionSyntax ->
+    MySQLFromSyntax
   innerJoin lArg rArg cond =
     InnerJoin (joinAnn lArg rArg cond) lArg rArg cond
   {-# INLINABLE leftJoin #-}
+  leftJoin ::
+    MySQLFromSyntax ->
+    MySQLFromSyntax ->
+    Maybe MySQLExpressionSyntax ->
+    MySQLFromSyntax
   leftJoin lArg rArg cond =
     LeftJoin (joinAnn lArg rArg cond) lArg rArg cond
   {-# INLINABLE rightJoin #-}
+  rightJoin ::
+    MySQLFromSyntax ->
+    MySQLFromSyntax ->
+    Maybe MySQLExpressionSyntax ->
+    MySQLFromSyntax
   rightJoin lArg rArg cond =
     RightJoin (joinAnn lArg rArg cond) lArg rArg cond
 
@@ -622,6 +856,7 @@ instance IsSql92GroupingSyntax MySQLGroupingSyntax where
   type Sql92GroupingExpressionSyntax MySQLGroupingSyntax =
     MySQLExpressionSyntax
   {-# INLINABLE groupByExpressions #-}
+  groupByExpressions :: [MySQLExpressionSyntax] -> MySQLGroupingSyntax
   groupByExpressions es =
     GroupByExpressions (foldMap getAnn es) (fromList es)
 
@@ -641,6 +876,12 @@ instance IsSql92SelectSyntax MySQLSelect where
   type Sql92SelectOrderingSyntax MySQLSelect =
     MySQLOrderingSyntax
   {-# INLINABLE selectStmt #-}
+  selectStmt ::
+    MySQLSelectTableSyntax ->
+    [MySQLOrderingSyntax] ->
+    Maybe Integer ->
+    Maybe Integer ->
+    MySQLSelect
   selectStmt table' orderings' limit' offset' =
     SelectStmt ann' table' (fromList orderings') limit' offset'
     where
