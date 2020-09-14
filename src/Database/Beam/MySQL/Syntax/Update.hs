@@ -11,7 +11,7 @@ import           Database.Beam.MySQL.Syntax.Select (ExpressionAnn,
                                                     getAnn)
 
 data FieldUpdate = FieldUpdate {
-  fieldName       :: {-# UNPACK #-} !MySQLFieldNameSyntax,
+  fieldName       :: !MySQLFieldNameSyntax,
   fieldExpression :: !MySQLExpressionSyntax
   }
   deriving stock (Eq, Show)
