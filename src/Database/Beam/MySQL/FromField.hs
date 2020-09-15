@@ -137,6 +137,20 @@ instance FromFieldStrict Word where
     MySQLDecimal v -> tryScientific v
     v -> handleNullOrMismatch v
 
+instance FromFieldStrict Scientific where
+  {-# INLINABLE fromFieldStrict #-}
+  fromFieldStrict = \case
+    MySQLDecimal v -> pure v
+    MySQLInt8 v    -> pure . fromIntegral $ v
+    MySQLInt8U v   -> pure . fromIntegral $ v
+    MySQLInt16 v   -> pure . fromIntegral $ v
+    MySQLInt16U v  -> pure . fromIntegral $ v
+    MySQLInt32 v   -> pure . fromIntegral $ v
+    MySQLInt32U v  -> pure . fromIntegral $ v
+    MySQLInt64 v   -> pure . fromIntegral $ v
+    MySQLInt64U v  -> pure . fromIntegral $ v
+    v -> handleNullOrMismatch v
+
 instance FromFieldStrict Float where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
@@ -200,12 +214,9 @@ class (FromFieldStrict a) => FromFieldLenient (a :: Type) where
     Left (DecodeError err t) -> Left . DecodeError (SomeStrict err) $ t
     Right res                -> Right res
 
-instance (FromFieldStrict a,
-          Read a,
-          Typeable a,
-          Integral a,
-          Bounded a) =>
-  FromFieldLenient a where
+instance FromFieldLenient Bool
+
+instance FromFieldLenient Int8 where
   {-# INLINABLE fromFieldLenient #-}
   fromFieldLenient v = case fromFieldStrict v of
     Left (DecodeError err t)    -> case err of
@@ -216,6 +227,116 @@ instance (FromFieldStrict a,
         _              -> Left . DecodeError (SomeStrict err) $ t
       _            -> Left . DecodeError (SomeStrict err) $ t
     Right res -> Right res
+
+instance FromFieldLenient Int16 where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Int32 where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Int64 where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Int where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Word8 where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Word16 where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Word32 where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Word64 where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Word where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t)    -> case err of
+      TypeMismatch -> case v of
+        MySQLText v'   -> tryText v'
+        MySQLFloat v'  -> tryIEEE v'
+        MySQLDouble v' -> tryIEEE v'
+        _              -> Left . DecodeError (SomeStrict err) $ t
+      _            -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
+
+instance FromFieldLenient Scientific
 
 instance FromFieldLenient Float where
   {-# INLINABLE fromFieldLenient #-}
@@ -237,6 +358,8 @@ instance FromFieldLenient Double where
       _ -> Left . DecodeError (SomeStrict err) $ t
     Right res -> Right res
 
+instance FromFieldLenient SqlNull
+
 instance FromFieldLenient Text where
   {-# INLINABLE fromFieldLenient #-}
   fromFieldLenient v = case fromFieldStrict v of
@@ -256,6 +379,14 @@ instance FromFieldLenient Text where
         _               -> Left . DecodeError (SomeStrict err) $ t
       _ -> Left . DecodeError (SomeStrict err) $ t
     Right res -> Right res
+
+instance FromFieldLenient ByteString
+
+instance FromFieldLenient Day
+
+instance FromFieldLenient TimeOfDay
+
+instance FromFieldLenient LocalTime
 
 -- Helpers
 

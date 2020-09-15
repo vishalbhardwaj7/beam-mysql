@@ -1,3 +1,5 @@
+-- Due to RDP plugin. - Koz
+{-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies        #-}
@@ -22,7 +24,7 @@ import           Data.Kind (Type)
 import           Data.Proxy (Proxy (Proxy))
 import           Data.Scientific (Scientific)
 import           Data.Text (Text, pack)
-import           Data.Time (Day, LocalTime, NominalDiffTime, TimeOfDay)
+import           Data.Time (Day, LocalTime, TimeOfDay)
 import           Data.Vector (Vector)
 import qualified Data.Vector as V
 import           Data.Word (Word16, Word32, Word64, Word8)
@@ -32,18 +34,19 @@ import           Database.Beam.Backend (BeamBackend (..), BeamSqlBackend,
                                         FromBackendRowF (..),
                                         FromBackendRowM (..), MonadBeam (..))
 import           Database.Beam.Backend.SQL (BeamSqlBackendIsString, SqlNull)
+import           Database.Beam.MySQL.Syntax.Render (RenderError (..),
+                                                    RenderErrorType (..),
+                                                    renderDelete, renderInsert,
+                                                    renderSelect, renderUpdate)
 import           Database.Beam.MySQL.Utils (toSQLTypeName)
 #ifdef LENIENT
-import           Database.Beam.MySQL.FromField (FromFieldL (fromFieldL),
-                                                LenientDecodeError (..),
-                                                StrictDecodeError (..))
+import           Database.Beam.MySQL.FromField (DecodeError (DecodeError), FromFieldLenient (fromFieldLenient),
+                                                Lenient (..), Strict (..))
 #else
-import           Database.Beam.MySQL.FromField (FromFieldS (fromFieldS),
-                                                LenientDecodeError (..),
-                                                StrictDecodeError (..))
+import           Database.Beam.MySQL.FromField (DecodeError (DecodeError), FromFieldStrict (fromFieldStrict),
+                                                Strict (..))
 #endif
-import           Database.Beam.MySQL.Syntax (MysqlSyntax (..), intoDebugText,
-                                             intoQuery)
+import           Database.Beam.MySQL.Syntax (MySQLSyntax (..))
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck)
 import           Database.Beam.Query.SQL92 (buildSql92Query')
@@ -64,15 +67,15 @@ instance BeamSqlBackendIsString MySQL Text
 
 #ifdef LENIENT
 instance BeamBackend MySQL where
-  type BackendFromField MySQL = FromFieldL
+  type BackendFromField MySQL = FromFieldLenient
 #else
 instance BeamBackend MySQL where
-  type BackendFromField MySQL = FromFieldS
+  type BackendFromField MySQL = FromFieldStrict
 #endif
 
 instance BeamSqlBackend MySQL
 
-type instance BeamSqlBackendSyntax MySQL = MysqlSyntax
+type instance BeamSqlBackendSyntax MySQL = MySQLSyntax
 
 instance HasQBuilder MySQL where
   buildSqlQuery = buildSql92Query' True
@@ -199,11 +202,15 @@ instance HasSqlEqualityCheck MySQL TimeOfDay
 
 instance HasSqlQuantifiedEqualityCheck MySQL TimeOfDay
 
-instance FromBackendRow MySQL NominalDiffTime
+data MySQLStatementError =
+  OperationNotSupported {
+    operationName :: {-# UNPACK #-} !Text,
+    context       :: {-# UNPACK #-} !Text,
+    statement     :: {-# UNPACK #-} !Text
+    }
+  deriving stock (Eq, Show)
 
-instance HasSqlEqualityCheck MySQL NominalDiffTime
-
-instance HasSqlQuantifiedEqualityCheck MySQL NominalDiffTime
+instance Exception MySQLStatementError
 
 data ColumnDecodeError =
   FoundUnexpectedNull {
@@ -289,25 +296,25 @@ instance MonadFail MySQLM where
 
 instance MonadBeam MySQL MySQLM where
   {-# INLINABLE runNoReturn #-}
-  runNoReturn sql@(MysqlSyntax (_, _)) = do
-    (statement, conn) <- processAndLog sql
-    void . liftIO . execute_ conn $ statement
+  runNoReturn sql = do
+    (stmt, conn, _) <- processAndLog sql
+    void . liftIO . execute_ conn $ stmt
   {-# INLINABLE runReturningOne #-}
-  runReturningOne sql@(MysqlSyntax (tables, _)) = do
-    (statement, conn) <- processAndLog sql
-    bracket (acquireStream conn statement)
+  runReturningOne sql = do
+    (stmt, conn, tables) <- processAndLog sql
+    bracket (acquireStream conn stmt)
             drainStream
             (processOneResult tables)
   {-# INLINABLE runReturningList #-}
-  runReturningList sql@(MysqlSyntax (tables, _)) = do
-    (statement, conn) <- processAndLog sql
-    bracket (acquireStream conn statement)
+  runReturningList sql = do
+    (stmt, conn, tables) <- processAndLog sql
+    bracket (acquireStream conn stmt)
             drainStream
             (\stream -> liftIO (S.toList =<< parseRowsIO tables stream))
   {-# INLINABLE runReturningMany #-}
-  runReturningMany sql@(MysqlSyntax (tables, _)) callback = do
-    (statement, conn) <- processAndLog sql
-    bracket (acquireStream conn statement)
+  runReturningMany sql callback = do
+    (stmt, conn, tables) <- processAndLog sql
+    bracket (acquireStream conn stmt)
             drainStream
             (\stream -> callback $ liftIO (read =<< parseRowsIO tables stream))
 
@@ -322,18 +329,32 @@ runBeamMySQLDebug dbg conn (MySQLM comp) =
 
 -- Helpers
 
+-- Rendering aid
+
+renderMySQL :: MySQLSyntax -> Either RenderError (HashSet Text, Query)
+renderMySQL = \case
+  ASelect sql -> renderSelect sql
+  AnInsert sql -> renderInsert sql
+  AnUpdate sql -> renderUpdate sql
+  ADelete sql -> renderDelete sql
+
 -- Removes some duplication from MonadBeam instance
 
-processAndLog :: MysqlSyntax -> MySQLM (Query, MySQLConn)
+processAndLog :: MySQLSyntax -> MySQLM (Query, MySQLConn, HashSet Text)
 processAndLog sql = do
-  let statement = intoQuery sql
-  env <- MySQLM ask
-  conn <- case env of
-    DebugEnv dbg conn -> do
-      liftIO . dbg . intoDebugText $ sql
-      pure conn
-    ReleaseEnv conn   -> pure conn
-  pure (statement, conn)
+  let rendered = renderMySQL sql
+  case rendered of
+    Left (RenderError typ ast) -> case typ of
+      UnsupportedOperation op ->
+        throw (OperationNotSupported op ast (pack . show $ sql))
+    Right (tables, stmt) -> do
+      env <- MySQLM ask
+      conn <- case env of
+        DebugEnv _ conn -> do
+          -- TODO: Debug output. - Koz
+          pure conn
+        ReleaseEnv conn -> pure conn
+      pure (stmt, conn, tables)
 
 acquireStream :: (MonadIO m) =>
   MySQLConn -> Query -> m (InputStream (Vector (FieldType, MySQLValue)))
@@ -384,12 +405,12 @@ parseRowsIO tables = mapM go
 
 #ifdef LENIENT
 newtype Decode (a :: Type) =
-  Decode (ExceptT (Either Int LenientDecodeError)
+  Decode (ExceptT (Either Int (DecodeError Lenient))
           (RWS (Vector MySQLValue) () Int) a)
   deriving newtype (Functor,
                     Applicative,
                     Monad,
-                    MonadError (Either Int LenientDecodeError),
+                    MonadError (Either Int (DecodeError Lenient)),
                     MonadReader (Vector MySQLValue),
                     MonadState Int)
 
@@ -404,18 +425,21 @@ runDecode (Decode comp) v tables =
     (Left failure, lastIx, _) -> Left $ case failure of
       Left needed ->
         DemandedTooManyFields (fromIntegral lastIx + 1) . fromIntegral $ needed
-      Right err   ->
-        let (tyName, ft, ix', v') = disassembleLenient err v lastIx in
+      Right (DecodeError err typ)   ->
+        let ft = toSQLTypeName . fst $ v V.! lastIx
+            ix' = fromIntegral lastIx
+            v' = pack . show . snd $ v V.! lastIx
+            tyName = tyConNameText typ in
           case err of
-            SomeStrictError err' -> case err' of
-              UnexpectedNull _ -> FoundUnexpectedNull tyName ft tables ix'
-              TypeMismatch _ -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
-              Won'tFit _ -> ValueWon'tFitIntoType tyName ft tables ix' v'
-            IEEENaN _ -> LenientUnexpectedNaN tyName ft tables ix'
-            IEEEInfinity _ -> LenientUnexpectedInfinity tyName ft tables ix' v'
-            IEEETooSmall _ -> LenientTooSmallToFit tyName ft tables ix' v'
-            IEEETooBig _ -> LenientTooBigToFit tyName ft tables ix' v'
-            TextCouldNotParse _ -> LenientTextCouldn'tParse tyName ft tables ix' v'
+            SomeStrict err' -> case err' of
+              UnexpectedNull -> FoundUnexpectedNull tyName ft tables ix'
+              TypeMismatch -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
+              Won'tFit -> ValueWon'tFitIntoType tyName ft tables ix' v'
+            IEEENaN -> LenientUnexpectedNaN tyName ft tables ix'
+            IEEEInfinity -> LenientUnexpectedInfinity tyName ft tables ix' v'
+            IEEETooSmall -> LenientTooSmallToFit tyName ft tables ix' v'
+            IEEETooBig -> LenientTooBigToFit tyName ft tables ix' v'
+            TextCouldNotParse -> LenientTextCouldn'tParse tyName ft tables ix' v'
 
 decodeFromRow :: Int -> FromBackendRowF MySQL (Decode a) -> Decode a
 decodeFromRow needed = \case
@@ -423,7 +447,7 @@ decodeFromRow needed = \case
     curr <- currentValue
     case curr of
       Nothing -> throwError . Left $ needed
-      Just val -> case fromFieldL val of
+      Just val -> case fromFieldLenient val of
         Left err -> throwError . Right $ err
         Right x  -> advanceIndex >> callback x
   Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
@@ -443,12 +467,12 @@ decodeFromRow needed = \case
   FailParseWith err -> error ("Leaked beam internal with: " <> show err)
 #else
 newtype Decode (a :: Type) =
-  Decode (ExceptT (Either Int StrictDecodeError)
+  Decode (ExceptT (Either Int (DecodeError Strict))
           (RWS (Vector MySQLValue) () Int) a)
   deriving newtype (Functor,
                     Applicative,
                     Monad,
-                    MonadError (Either Int StrictDecodeError),
+                    MonadError (Either Int (DecodeError Strict)),
                     MonadReader (Vector MySQLValue),
                     MonadState Int)
 
@@ -463,12 +487,15 @@ runDecode (Decode comp) v tables =
     (Left failure, lastIx, _) -> Left $ case failure of
       Left needed ->
         DemandedTooManyFields (fromIntegral lastIx + 1) . fromIntegral $ needed
-      Right err ->
-        let (tyName, ft, ix', v') = disassembleStrict err v lastIx in
+      Right (DecodeError err typ) ->
+        let ft = toSQLTypeName . fst $ v V.! lastIx
+            ix' = fromIntegral lastIx
+            v' = pack . show . snd $ v V.! lastIx
+            tyName = tyConNameText typ in
           case err of
-            UnexpectedNull _ -> FoundUnexpectedNull tyName ft tables ix'
-            TypeMismatch _ -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
-            Won'tFit _ -> ValueWon'tFitIntoType tyName ft tables ix' v'
+            UnexpectedNull -> FoundUnexpectedNull tyName ft tables ix'
+            TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
+            Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
 
 decodeFromRow :: Int -> FromBackendRowF MySQL (Decode a) -> Decode a
 decodeFromRow needed = \case
@@ -476,7 +503,7 @@ decodeFromRow needed = \case
     curr <- currentValue
     case curr of
       Nothing -> throwError . Left $ needed
-      Just val -> case fromFieldS val of
+      Just val -> case fromFieldStrict val of
         Left err -> throwError . Right $ err
         Right x  -> advanceIndex >> callback x
   Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
@@ -507,6 +534,7 @@ advanceIndex = modify succ
 tyConNameText :: TyCon -> Text
 tyConNameText = pack . tyConName
 
+{-
 disassembleLenient ::
   LenientDecodeError ->
   Vector (FieldType, MySQLValue) ->
@@ -548,4 +576,4 @@ disassembleStrict err v lastIx =
     case err of
       UnexpectedNull t -> (tyConNameText t, ft, ix', v')
       TypeMismatch t   -> (tyConNameText t, ft, ix', v')
-      Won'tFit t       -> (tyConNameText t, ft, ix', v')
+      Won'tFit t       -> (tyConNameText t, ft, ix', v') -}

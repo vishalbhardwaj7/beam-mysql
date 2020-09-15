@@ -4,61 +4,49 @@
 
 module Database.Beam.MySQL.Extra where
 
-import           Control.Exception.Safe (bracket)
-import           Control.Monad (void)
-import           Control.Monad.IO.Class (liftIO)
-import           Control.Monad.Reader (ask)
-import           Data.Foldable (fold)
-import           Data.Functor.Identity (Identity)
-import           Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HM
 import           Data.Kind (Type)
-import           Data.List (intersperse)
 import           Data.Text (Text)
-import           Data.Text.Lazy (fromStrict, toStrict)
-import           Data.Text.Lazy.Encoding (encodeUtf8)
-import           Data.Vector (Vector)
-import qualified Data.Vector as V
-import           Database.Beam (FromBackendRow, runSelectReturningOne)
-import           Database.Beam.Backend.SQL (insertCmd, updateCmd)
-import           Database.Beam.MySQL.Connection (MySQL, MySQLM (MySQLM), MySQLMEnv (DebugEnv, ReleaseEnv),
-                                                 acquireStream, drainStream)
-import           Database.Beam.MySQL.Syntax (MysqlInsertSyntax (Insert), MysqlInsertValuesSyntax (FromExprs, FromSQL),
-                                             MysqlSyntax,
-                                             MysqlTableNameSyntax (MysqlTableNameSyntax),
-                                             backtickWrap, defaultE,
-                                             intoLazyText, intoQuery,
-                                             intoTableName, textSyntax)
+import           Data.Text.Lazy (toStrict)
+import           Data.Text.Lazy.Encoding (decodeUtf8)
+import           Database.Beam.MySQL.Connection (MySQL)
+import           Database.Beam.MySQL.Syntax.Render (renderDelete, renderInsert,
+                                                    renderSelect, renderUpdate)
 import           Database.Beam.Query (SqlDelete (SqlDelete),
                                       SqlInsert (SqlInsert, SqlInsertNoRows),
                                       SqlSelect (SqlSelect),
                                       SqlUpdate (SqlIdentityUpdate, SqlUpdate))
-import           Database.MySQL.Base (MySQLConn, MySQLValue (MySQLText),
-                                      Query (Query), execute_, okAffectedRows)
+import           Database.MySQL.Base (Query (Query))
 import           Prelude hiding (map, read)
-import           System.IO.Streams (read)
-import           System.IO.Streams.Combinators (foldM, map)
 
 dumpInsertSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlInsert MySQL table -> Maybe Text
 dumpInsertSQL = \case
   SqlInsertNoRows -> Nothing
-  SqlInsert _ ins -> Just . toStrict . intoLazyText . insertCmd $ ins
+  SqlInsert _ ins -> case renderInsert ins of
+    Left _                 -> Nothing
+    Right (_, Query query) -> Just . toStrict . decodeUtf8 $ query
 
 dumpSelectSQL :: forall (a :: Type) .
-  SqlSelect MySQL a -> Text
-dumpSelectSQL (SqlSelect sel) = toStrict . intoLazyText $ sel
+  SqlSelect MySQL a -> Maybe Text
+dumpSelectSQL (SqlSelect sel) = case renderSelect sel of
+  Left _                 -> Nothing
+  Right (_, Query query) -> Just . toStrict . decodeUtf8 $ query
 
 dumpUpdateSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlUpdate MySQL table -> Maybe Text
 dumpUpdateSQL = \case
   SqlIdentityUpdate -> Nothing
-  SqlUpdate _ upd -> Just . toStrict . intoLazyText . updateCmd $ upd
+  SqlUpdate _ upd -> case renderUpdate upd of
+    Left _                 -> Nothing
+    Right (_, Query query) -> Just . toStrict . decodeUtf8 $ query
 
 dumpDeleteSQL :: forall (table :: (Type -> Type) -> Type) .
-  SqlDelete MySQL table -> Text
-dumpDeleteSQL (SqlDelete _ del) = toStrict . intoLazyText $ del
+  SqlDelete MySQL table -> Maybe Text
+dumpDeleteSQL (SqlDelete _ del) = case renderDelete del of
+  Left _                 -> Nothing
+  Right (_, Query query) -> Just . toStrict . decodeUtf8 $ query
 
+{-
 runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
   (FromBackendRow MySQL (table Identity)) =>
   SqlInsert MySQL table -> MySQLM (Maybe (table Identity))
@@ -166,4 +154,4 @@ runInsertRowReturning = \case
       regraft autoincCol pkName pkValue =
         if pkName == autoincCol && pkValue == defaultE
         then "last_insert_id()"
-        else pkValue
+        else pkValue -}

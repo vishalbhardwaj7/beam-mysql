@@ -2,7 +2,7 @@ module Database.Beam.MySQL
 (
   MySQL, MySQLM,
   runInsertRowReturning,
-  ColumnDecodeError (..),
+  ColumnDecodeError (..), MySQLStatementError (..),
   runBeamMySQL, runBeamMySQLDebug,
   dumpInsertSQL, dumpSelectSQL, dumpUpdateSQL, dumpDeleteSQL
 ) where

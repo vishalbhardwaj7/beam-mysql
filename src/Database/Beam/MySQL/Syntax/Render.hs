@@ -52,13 +52,9 @@ import           Mason.Builder (BuilderFor, LazyByteStringBackend, byteString,
                                 string8, textUtf8, toLazyByteString, word16Dec,
                                 word32Dec, word64Dec, word8Dec, wordDec)
 
-data RenderErrorType =
-  UnsupportedOperation {-# UNPACK #-} !Text |
-  CharLengthTooLarge {-# UNPACK #-} !Word |
-  VarCharLengthTooLarge {-# UNPACK #-} !Word |
-  InvalidBitLength {-# UNPACK #-} !Word |
-  InvalidVarBitLength {-# UNPACK #-} !Word
-  deriving stock (Show, Eq)
+newtype RenderErrorType = UnsupportedOperation Text
+  deriving stock (Show)
+  deriving newtype (Eq)
 
 data RenderError = RenderError {
   errorType   :: !RenderErrorType,
