@@ -310,6 +310,7 @@ renderExpr = \case
     else pure $
       "CONCAT" <>
       bracketWrap (intersperse ", " . toList $ es')
+  LastInsertId -> pure "last_insert_id()"
 
 renderAggregationSetQuantifier ::
   MySQLAggregationSetQuantifierSyntax ->

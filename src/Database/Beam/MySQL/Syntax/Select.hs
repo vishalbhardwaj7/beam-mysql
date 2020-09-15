@@ -330,7 +330,10 @@ data MySQLExpressionSyntax =
   Concat {
     ann   :: !ExpressionAnn,
     exprs :: {-# UNPACK #-} !(Vector MySQLExpressionSyntax)
-    }
+    } |
+  -- This is needed to support runInsertRowReturning. It is unannotated, because
+  -- it's never constructed by beam.
+  LastInsertId
   deriving stock (Eq, Show)
 
 getAnn :: MySQLExpressionSyntax -> ExpressionAnn

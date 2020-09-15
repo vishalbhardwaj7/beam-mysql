@@ -209,6 +209,10 @@ data MySQLStatementError =
     operationName :: {-# UNPACK #-} !Text,
     context       :: {-# UNPACK #-} !Text,
     statement     :: {-# UNPACK #-} !Text
+    } |
+  ImpureExpression {
+    expression :: {-# UNPACK #-} !Text,
+    statement  :: {-# UNPACK #-} !Text
     }
   deriving stock (Eq, Show)
 
