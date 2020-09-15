@@ -24,6 +24,8 @@ import           Data.Kind (Type)
 import           Data.Proxy (Proxy (Proxy))
 import           Data.Scientific (Scientific)
 import           Data.Text (Text, pack)
+import           Data.Text.Lazy (toStrict)
+import           Data.Text.Lazy.Encoding (decodeUtf8)
 import           Data.Time (Day, LocalTime, TimeOfDay)
 import           Data.Vector (Vector)
 import qualified Data.Vector as V
@@ -347,12 +349,12 @@ processAndLog sql = do
     Left (RenderError typ ast) -> case typ of
       UnsupportedOperation op ->
         throw (OperationNotSupported op ast (pack . show $ sql))
-    Right (tables, stmt) -> do
+    Right (tables, stmt@(Query inner)) -> do
       env <- MySQLM ask
       conn <- case env of
-        DebugEnv _ conn -> do
-          -- TODO: Debug output. - Koz
-          pure conn
+        DebugEnv dbg conn -> do
+          let textual = toStrict . decodeUtf8 $ inner
+          liftIO (dbg textual) >> pure conn
         ReleaseEnv conn -> pure conn
       pure (stmt, conn, tables)
 
@@ -533,47 +535,3 @@ advanceIndex = modify succ
 
 tyConNameText :: TyCon -> Text
 tyConNameText = pack . tyConName
-
-{-
-disassembleLenient ::
-  LenientDecodeError ->
-  Vector (FieldType, MySQLValue) ->
-  Int ->
-  (Text, Text, Word, Text)
-disassembleLenient err v lastIx = case err of
-  SomeStrictError err' -> disassembleStrict err' v lastIx
-  IEEENaN t -> (tyConNameText t,
-                toSQLTypeName . fst $ v V.! lastIx,
-                fromIntegral lastIx,
-                pack . show . snd $ v V.! lastIx)
-  IEEEInfinity t -> (tyConNameText t,
-                toSQLTypeName . fst $ v V.! lastIx,
-                fromIntegral lastIx,
-                pack . show . snd $ v V.! lastIx)
-  IEEETooSmall t -> (tyConNameText t,
-                toSQLTypeName . fst $ v V.! lastIx,
-                fromIntegral lastIx,
-                pack . show . snd $ v V.! lastIx)
-  IEEETooBig t -> (tyConNameText t,
-                toSQLTypeName . fst $ v V.! lastIx,
-                fromIntegral lastIx,
-                pack . show . snd $ v V.! lastIx)
-  TextCouldNotParse t -> (tyConNameText t,
-                toSQLTypeName . fst $ v V.! lastIx,
-                fromIntegral lastIx,
-                pack . show . snd $ v V.! lastIx)
-
-
-disassembleStrict ::
-  StrictDecodeError ->
-  Vector (FieldType, MySQLValue) ->
-  Int ->
-  (Text, Text, Word, Text)
-disassembleStrict err v lastIx =
-  let ft = toSQLTypeName . fst $ v V.! lastIx
-      ix' = fromIntegral lastIx
-      v' = pack . show . snd $ v V.! lastIx in
-    case err of
-      UnexpectedNull t -> (tyConNameText t, ft, ix', v')
-      TypeMismatch t   -> (tyConNameText t, ft, ix', v')
-      Won'tFit t       -> (tyConNameText t, ft, ix', v') -}
