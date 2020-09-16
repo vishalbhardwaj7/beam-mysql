@@ -2,6 +2,273 @@
 
 module Database.Beam.MySQL.Syntax.Render where
 
+import           Control.Monad.Except (MonadError (throwError))
+import           Control.Monad.Writer.Strict (MonadWriter (tell), WriterT,
+                                              runWriterT)
+import           Data.Bifunctor (first)
+import           Data.Foldable (fold)
+import           Data.HashSet (HashSet, singleton)
+import           Data.Kind (Type)
+import           Data.String (IsString)
+import           Data.Text (Text, pack)
+import           Data.Vector (Vector, length, toList)
+import           Database.Beam.MySQL.Syntax.Delete (MySQLDelete)
+import           Database.Beam.MySQL.Syntax.Insert (MySQLInsert)
+import           Database.Beam.MySQL.Syntax.Misc (MySQLAggregationSetQuantifierSyntax (..),
+                                                  MySQLFieldNameSyntax)
+import           Database.Beam.MySQL.Syntax.Select (BinOp, CaseBranch,
+                                                    MySQLExpressionSyntax (..),
+                                                    MySQLFromSyntax (..),
+                                                    MySQLGroupingSyntax,
+                                                    MySQLOrderingSyntax,
+                                                    MySQLProjectionSyntax (..),
+                                                    MySQLSelect,
+                                                    MySQLSelectTableSyntax (..),
+                                                    MySQLTableNameSyntax,
+                                                    MySQLTableSourceSyntax (..),
+                                                    Projection,
+                                                    TableHeader (..),
+                                                    TableRowExpression (..))
+import           Database.Beam.MySQL.Syntax.Update (MySQLUpdate)
+import           Database.Beam.MySQL.Syntax.Value (MySQLValueSyntax)
+import           Database.MySQL.Base (Query (Query))
+import           Mason.Builder (BuilderFor, LazyByteStringBackend, integerDec,
+                                intersperse, textUtf8, toLazyByteString)
+import           Prelude hiding (length)
+
+newtype RenderErrorType = UnsupportedOperation Text
+  deriving stock (Show)
+  deriving newtype (Eq)
+
+data RenderError = RenderError {
+  errorType   :: !RenderErrorType,
+  astFragment :: {-# UNPACK #-} !Text
+  }
+  deriving stock (Eq, Show)
+
+renderSelect :: MySQLSelect -> Either RenderError (Query, HashSet Text)
+renderSelect = runRender . fmap (<> ";") . renderSelect'
+
+renderInsert :: MySQLInsert -> Either RenderError (Query, HashSet Text)
+renderInsert = runRender . renderInsert'
+
+renderUpdate :: MySQLUpdate -> Either RenderError (Query, HashSet Text)
+renderUpdate = runRender . renderUpdate'
+
+renderDelete :: MySQLDelete -> Either RenderError (Query, HashSet Text)
+renderDelete = runRender . renderDelete'
+
+-- Helpers
+
+-- ugh
+type Builder = BuilderFor LazyByteStringBackend
+
+newtype RenderM (a :: Type) =
+  RenderM (WriterT (HashSet Text) (Either RenderError) a)
+  deriving newtype (Functor,
+                    Applicative,
+                    Monad,
+                    MonadWriter (HashSet Text),
+                    MonadError RenderError)
+
+runRender ::
+  RenderM Builder ->
+  Either RenderError (Query, HashSet Text)
+runRender (RenderM comp) = first (Query . toLazyByteString) <$> runWriterT comp
+
+renderSelect' :: MySQLSelect -> RenderM Builder
+renderSelect' sel = do
+  table' <- renderSelectTable sel.table
+  orderings' <- traverse renderOrdering sel.orderings
+  let limit' = fmap integerDec sel.limit
+  let offset' = fmap integerDec sel.offset
+  pure $
+    table' <>
+    go orderings' <>
+    go2 limit' offset'
+  where
+    go :: Vector Builder -> Builder
+    go v = if length v == 0
+      then mempty
+      else " ORDER BY " <> (intersperse ", " . toList $ v)
+    go2 :: Maybe Builder -> Maybe Builder -> Builder
+    go2 limit' offset' = case limit' of
+      Nothing -> mempty
+      Just lim -> case offset' of
+        Nothing  -> " LIMIT " <> lim
+        Just off -> " LIMIT " <> off <> ", " <> lim
+
+renderSelectTable :: MySQLSelectTableSyntax -> RenderM Builder
+renderSelectTable sts = case sts of
+  UnionTablesAll{}      -> do
+    l' <- renderSelectTable sts.lTable
+    r' <- renderSelectTable sts.rTable
+    pure $ l' <> " UNION ALL " <> r'
+  UnionTablesDistinct{} -> do
+    l' <- renderSelectTable sts.lTable
+    r' <- renderSelectTable sts.rTable
+    pure $ l' <> " UNION DISTINCT " <> r'
+  IntersectTables{}     -> invalidOp "INTERSECT" sts
+  ExceptTable{}         -> invalidOp "EXCEPT" sts
+  _                     -> do
+    q <- traverse renderSetQuantifier sts.quantifier
+    proj <- renderProjection sts.projection
+    from' <- traverse renderFrom sts.from
+    wher' <- traverse renderExpr sts.wher
+    grouping' <- traverse renderGrouping sts.grouping
+    having' <- traverse renderExpr sts.having
+    pure $
+      "SELECT " <>
+      foldMap (" " <>) q <>
+      proj <>
+      foldMap (" FROM " <>) from' <>
+      foldMap (" WHERE " <>) wher' <>
+      foldMap (" GROUP BY " <>) grouping' <>
+      foldMap (" HAVING " <>) having'
+
+renderSetQuantifier :: MySQLAggregationSetQuantifierSyntax -> RenderM Builder
+renderSetQuantifier = pure . \case
+  SetDistinct -> "DISTINCT"
+  SetAll -> "ALL"
+
+renderProjection :: MySQLProjectionSyntax -> RenderM Builder
+renderProjection (ProjectExpressions es) = do
+  projs <- traverse go es
+  pure . intersperse ", " . toList $ projs
+  where
+    go :: Projection -> RenderM Builder
+    go p = do
+      e' <- renderExpr p.expr
+      pure $ e' <> foldMap ((" AS " <>) . backtickWrap . textUtf8) p.label
+
+renderFrom :: MySQLFromSyntax -> RenderM Builder
+renderFrom fs = case fs of
+  FromTable{} -> do
+    src <- renderTableSource fs.tableSource
+    hdr <- renderTableHeader fs.tableHeader
+    pure $ src <> hdr
+  InnerJoin{} -> do
+    (l, r, c) <- renderJoinParts fs.leftArg fs.rightArg fs.condition
+    pure $ l <> " JOIN " <> r <> fold c
+  LeftJoin{}  -> do
+    (l, r, c) <- renderJoinParts fs.leftArg fs.rightArg fs.condition
+    pure $ l <> " LEFT JOIN " <> r <> fold c
+  RightJoin{} -> do
+    (l, r, c) <- renderJoinParts fs.leftArg fs.rightArg fs.condition
+    pure $ l <> " RIGHT JOIN " <> r <> fold c
+
+renderJoinParts ::
+  MySQLFromSyntax ->
+  MySQLFromSyntax ->
+  Maybe MySQLExpressionSyntax ->
+  RenderM (Builder, Builder, Maybe Builder)
+renderJoinParts l r c =
+  (,,) <$> renderFrom l <*> renderFrom r <*> traverse renderExpr c
+
+renderTableSource :: MySQLTableSourceSyntax -> RenderM Builder
+renderTableSource = \case
+  TableNamed nam -> renderTableName nam
+  TableFromSubSelect sel -> bracketWrap <$> renderSelect' sel
+  TableFromValues rs ->
+    bracketWrap . intersperse " UNION " . toList . fmap ("SELECT " <>) <$>
+      traverse renderTableRow rs
+
+renderTableName :: MySQLTableNameSyntax -> RenderM Builder
+renderTableName tns = do
+  tell . singleton $ tns.name
+  pure $ foldMap textUtf8 tns.schema <> (backtickWrap . textUtf8 $ tns.name)
+
+renderTableRow :: TableRowExpression -> RenderM Builder
+renderTableRow (TableRowExpression v) = do
+  v' <- traverse renderExpr v
+  pure . intersperse ", " . fmap bracketWrap . toList $ v'
+
+renderTableHeader :: TableHeader -> RenderM Builder
+renderTableHeader = pure . \case
+  Anonymous -> mempty
+  TableNameOnly nam -> " AS " <> (backtickWrap . textUtf8 $ nam)
+  TableAndColumns nam cols ->
+    " AS " <>
+    (backtickWrap . textUtf8 $ nam) <>
+    (bracketWrap . intersperse ", " . toList . fmap (backtickWrap . textUtf8) $ cols)
+
+renderExpr :: MySQLExpressionSyntax -> RenderM Builder
+renderExpr es = case es of
+  Value v -> renderValue v
+  Row exprs -> do
+    exprs' <- traverse renderExpr exprs
+    pure . bracketWrap . intersperse ", " . toList $ exprs'
+  Coalesce exprs -> do
+    exprs' <- traverse renderExpr exprs
+    pure . ("COALESCE " <>) . bracketWrap . intersperse ", " . toList $ exprs'
+  Case{} -> do
+    cases' <- traverse renderCaseBranch es.cases
+    def <- renderExpr es.defaultCase
+    pure $
+      "CASE " <>
+      (intersperse " " . toList $ cases') <>
+      "ELSE " <>
+      def <>
+      " END"
+  Field nam -> renderFieldName nam
+  BinaryOperation{} -> do
+    op' <- renderBinOp es.binOp
+    l' <- renderExpr es.lOperand
+    r' <- renderExpr es.rOperand
+    pure $
+      bracketWrap l' <>
+      " " <>
+      op' <>
+      " " <>
+      bracketWrap r'
+  ComparisonOperation{} -> _
+
+renderBinOp :: BinOp -> RenderM Builder
+renderBinOp = _
+
+renderFieldName :: MySQLFieldNameSyntax -> RenderM Builder
+renderFieldName = _
+
+renderCaseBranch :: CaseBranch -> RenderM Builder
+renderCaseBranch = _
+
+renderValue :: MySQLValueSyntax -> RenderM Builder
+renderValue = _
+
+renderGrouping :: MySQLGroupingSyntax -> RenderM Builder
+renderGrouping = _
+
+invalidOp :: Text -> MySQLSelectTableSyntax -> RenderM Builder
+invalidOp t = throwError . RenderError (UnsupportedOperation t) . pack . show
+
+renderOrdering :: MySQLOrderingSyntax -> RenderM Builder
+renderOrdering = _
+
+renderInsert' :: MySQLInsert -> RenderM Builder
+renderInsert' = _
+
+renderUpdate' :: MySQLUpdate -> RenderM Builder
+renderUpdate' = _
+
+renderDelete' :: MySQLDelete -> RenderM Builder
+renderDelete' = _
+
+wrap :: (Semigroup s) => s -> s -> s -> s
+wrap l r v = l <> v <> r
+
+bracketWrap :: (IsString s, Semigroup s) => s -> s
+bracketWrap = wrap "(" ")"
+
+quoteWrap :: (IsString s, Semigroup s) => s -> s
+quoteWrap = wrap "'" "'"
+
+backtickWrap :: (IsString s, Semigroup s) => s -> s
+backtickWrap = wrap "`" "`"
+{-
+{-# LANGUAGE KindSignatures #-}
+
+module Database.Beam.MySQL.Syntax.Render where
+
 import           Data.Binary (Binary (put))
 import qualified Data.Binary.Builder as Bin
 import           Data.Bool (bool)
@@ -594,4 +861,4 @@ quoteWrap :: (IsString s, Semigroup s) => s -> s
 quoteWrap = wrap "'" "'"
 
 backtickWrap :: (IsString s, Semigroup s) => s -> s
-backtickWrap = wrap "`" "`"
+backtickWrap = wrap "`" "`" -}

@@ -5,10 +5,8 @@ module Database.Beam.MySQL.Syntax.Update where
 import           Data.Vector (Vector, fromList)
 import           Database.Beam.Backend.SQL (IsSql92UpdateSyntax (..))
 import           Database.Beam.MySQL.Syntax.Misc (MySQLFieldNameSyntax)
-import           Database.Beam.MySQL.Syntax.Select (ExpressionAnn,
-                                                    MySQLExpressionSyntax,
-                                                    MySQLTableNameSyntax,
-                                                    getAnn)
+import           Database.Beam.MySQL.Syntax.Select (MySQLExpressionSyntax,
+                                                    MySQLTableNameSyntax)
 
 data FieldUpdate = FieldUpdate {
   fieldName       :: !MySQLFieldNameSyntax,
@@ -17,7 +15,6 @@ data FieldUpdate = FieldUpdate {
   deriving stock (Eq, Show)
 
 data MySQLUpdate = UpdateStmt {
-  ann       :: !ExpressionAnn,
   tableName :: {-# UNPACK #-} !MySQLTableNameSyntax,
   updates   :: {-# UNPACK #-} !(Vector FieldUpdate),
   wher      :: !(Maybe MySQLExpressionSyntax)
@@ -37,11 +34,6 @@ instance IsSql92UpdateSyntax MySQLUpdate where
     [(MySQLFieldNameSyntax, MySQLExpressionSyntax)] ->
     Maybe MySQLExpressionSyntax ->
     MySQLUpdate
-  updateStmt tableName' updates' wher' =
-    UpdateStmt ann'
-               tableName'
+  updateStmt tableName' updates' =
+    UpdateStmt tableName'
                (fromList . fmap (uncurry FieldUpdate) $ updates')
-               wher'
-    where
-      ann' :: ExpressionAnn
-      ann' = foldMap ((.ann) . snd) updates' <> foldMap getAnn wher'

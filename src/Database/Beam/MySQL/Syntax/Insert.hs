@@ -1,5 +1,3 @@
--- Due to RDP plugin
-{-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
 {-# LANGUAGE TypeFamilies #-}
 
 module Database.Beam.MySQL.Syntax.Insert where
@@ -8,22 +6,14 @@ import           Data.Text (Text)
 import           Data.Vector (Vector, fromList)
 import           Database.Beam.Backend.SQL (IsSql92InsertSyntax (..),
                                             IsSql92InsertValuesSyntax (..))
-import           Database.Beam.MySQL.Syntax.Select (ExpressionAnn,
-                                                    MySQLExpressionSyntax,
+import           Database.Beam.MySQL.Syntax.Select (MySQLExpressionSyntax,
                                                     MySQLSelect,
                                                     MySQLTableNameSyntax,
-                                                    TableRowExpression (TableRowExpression),
-                                                    getAnn)
+                                                    TableRowExpression (TableRowExpression))
 
 data MySQLInsertValuesSyntax =
-  InsertSQLExpressions {
-    ann          :: !ExpressionAnn,
-    rowsToInsert :: {-# UNPACK #-} !(Vector TableRowExpression)
-    } |
-  InsertFromSQL {
-    ann          :: !ExpressionAnn,
-    selectSource :: MySQLSelect
-    }
+  InsertSQLExpressions {-# UNPACK #-} !(Vector TableRowExpression) |
+  InsertFromSQL MySQLSelect
   deriving stock (Eq, Show)
 
 instance IsSql92InsertValuesSyntax MySQLInsertValuesSyntax where
@@ -33,15 +23,13 @@ instance IsSql92InsertValuesSyntax MySQLInsertValuesSyntax where
     MySQLSelect
   {-# INLINABLE insertSqlExpressions #-}
   insertSqlExpressions :: [[MySQLExpressionSyntax]] -> MySQLInsertValuesSyntax
-  insertSqlExpressions rows =
-    InsertSQLExpressions (foldMap (foldMap getAnn) rows)
-                         (fromList . fmap (TableRowExpression . fromList) $ rows)
+  insertSqlExpressions =
+    InsertSQLExpressions . fromList . fmap (TableRowExpression . fromList)
   {-# INLINABLE insertFromSql #-}
   insertFromSql :: MySQLSelect -> MySQLInsertValuesSyntax
-  insertFromSql sel = InsertFromSQL sel.ann sel
+  insertFromSql = InsertFromSQL
 
 data MySQLInsert = InsertStmt {
-  ann          :: !ExpressionAnn,
   tableName    :: {-# UNPACK #-} !MySQLTableNameSyntax,
   columns      :: {-# UNPACK #-} !(Vector Text),
   insertValues :: MySQLInsertValuesSyntax
@@ -59,8 +47,6 @@ instance IsSql92InsertSyntax MySQLInsert where
     [Text] ->
     MySQLInsertValuesSyntax ->
     MySQLInsert
-  insertStmt tableName' columns' insertValues' =
-    InsertStmt insertValues'.ann
-               tableName'
+  insertStmt tableName' columns' =
+    InsertStmt tableName'
                (fromList columns')
-               insertValues'

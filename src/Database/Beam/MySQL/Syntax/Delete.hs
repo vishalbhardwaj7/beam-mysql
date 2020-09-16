@@ -4,12 +4,10 @@ module Database.Beam.MySQL.Syntax.Delete where
 
 import           Data.Text (Text)
 import           Database.Beam.Backend.SQL (IsSql92DeleteSyntax (..))
-import           Database.Beam.MySQL.Syntax.Select (ExpressionAnn,
-                                                    MySQLExpressionSyntax,
+import           Database.Beam.MySQL.Syntax.Select (MySQLExpressionSyntax,
                                                     MySQLTableNameSyntax)
 
 data MySQLDelete = DeleteStmt {
-  ann       :: !ExpressionAnn,
   tableName :: {-# UNPACK #-} !MySQLTableNameSyntax,
   wher      :: !(Maybe MySQLExpressionSyntax)
   }
@@ -27,6 +25,6 @@ instance IsSql92DeleteSyntax MySQLDelete where
     Maybe MySQLExpressionSyntax ->
     MySQLDelete
   deleteStmt tableName' _ wher' =
-    DeleteStmt (foldMap (.ann) wher') tableName' wher'
+    DeleteStmt tableName' wher'
   {-# INLINABLE deleteSupportsAlias #-}
   deleteSupportsAlias = const False
