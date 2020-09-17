@@ -65,6 +65,7 @@ common common-bench
   build-depends:
     , beam-core
     , beam-mysql
+    , fmt
     , gauge       ^>=0.2.5
     , mysql-temp
 
@@ -203,6 +204,11 @@ test-suite leniency
 benchmark insert
   import:         common-bench
   type:           exitcode-stdio-1.0
-  build-depends:  fmt
   main-is:        Main.hs
   hs-source-dirs: bench/insert
+
+benchmark select
+  import:         common-bench
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: bench/select
