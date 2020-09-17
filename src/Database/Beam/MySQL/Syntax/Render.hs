@@ -432,7 +432,7 @@ renderFieldName :: MySQLFieldNameSyntax -> RenderM Builder
 renderFieldName = pure . \case
   UnqualifiedField f -> backtickWrap . textUtf8 $ f
   QualifiedField t f ->
-    (backtickWrap . textUtf8 $ t) <> (backtickWrap . textUtf8 $ f)
+    (backtickWrap . textUtf8 $ t) <> "." <> (backtickWrap . textUtf8 $ f)
 
 renderCaseBranch :: CaseBranch -> RenderM Builder
 renderCaseBranch cb = do

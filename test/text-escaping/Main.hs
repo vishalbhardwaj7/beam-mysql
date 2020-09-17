@@ -25,16 +25,16 @@ main = hspec $ do
   describe "'\\' in generated SQL" $ do
     it "should be escaped in INSERT VALUES literals" $
       dumpInsertSQL insertStmt `shouldBe`
-        Just "INSERT INTO `test_table`(text) VALUES ('foo\\\"')"
+        Just "INSERT INTO `test_table`(text) VALUES ('foo\\\"');"
     it "should be escaped in SELECT WHERE literals" $
       dumpSelectSQL selectWhereStmt `shouldBe`
-        "SELECT `t0`.`text` AS `res0` FROM `test_table` AS `t0` WHERE (`t0`.`text`) = ('foo\\\"')"
+        Just "SELECT `t0`.`text` AS `res0` FROM `test_table` AS `t0` WHERE (`t0`.`text`) = ('foo\\\"');"
     it "should be escaped in UPDATE WHERE literals" $
       dumpUpdateSQL updateWhereStmt `shouldBe`
-        Just "UPDATE `test_table` SET `text`='bar\\\"' WHERE (`text`) = ('foo\\\"')"
+        Just "UPDATE `test_table` SET `text`='bar\\\"' WHERE (`text`) = ('foo\\\"');"
     it "should be escaped in DELETE WHERE literals" $
       dumpDeleteSQL deleteWhereStmt `shouldBe`
-        "DELETE FROM `test_table` WHERE (`text`) = ('foo\\\"')"
+        Just "DELETE FROM `test_table` WHERE (`text`) = ('foo\\\"');"
 
 -- Helpers
 
