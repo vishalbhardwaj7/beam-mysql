@@ -199,7 +199,7 @@ renderTableName tns = do
 renderTableRow :: TableRowExpression -> RenderM Builder
 renderTableRow (TableRowExpression v) = do
   v' <- traverse renderExpr v
-  pure . intersperse ", " . fmap bracketWrap . toList $ v'
+  pure . intersperse ", " . toList $ v'
 
 renderTableHeader :: TableHeader -> RenderM Builder
 renderTableHeader = pure . \case
@@ -494,6 +494,7 @@ renderInsert' ins = do
   pure $
     "INSERT INTO " <>
     tableName' <>
+    " " <>
     (bracketWrap . intersperse ", " . toList . fmap textUtf8 $ ins.columns) <>
     insertValues'
 
@@ -501,7 +502,7 @@ renderInsertValues :: MySQLInsertValuesSyntax -> RenderM Builder
 renderInsertValues = \case
   InsertSQLExpressions rti -> do
     rti' <- traverse renderTableRow rti
-    pure $ " VALUES " <> (intersperse ", " . toList $ rti')
+    pure $ " VALUES " <> (intersperse ", " . toList . fmap bracketWrap $ rti')
   InsertFromSQL sel -> renderSelect' sel
 
 renderUpdate' :: MySQLUpdate -> RenderM Builder

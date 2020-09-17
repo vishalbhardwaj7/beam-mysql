@@ -235,11 +235,11 @@ getPkCols conn nam = do
   let query = Query $
         "SELECT key_column_usage.column_name " <>
         "FROM information_schema.key_column_usage " <>
-        "WHERE table_schema = schema () " <>
+        "WHERE table_schema = schema() " <>
         "AND constraint_name = 'PRIMARY' " <>
-        "AND table_name '" <>
+        "AND table_name = '" <>
         (encodeUtf8 . fromStrict $ nam) <>
-        ";"
+        "';"
   bracket (acquireStream conn query)
           drainStream
           (liftIO . unfoldrM go)
