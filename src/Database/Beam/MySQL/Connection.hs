@@ -337,7 +337,7 @@ runBeamMySQLDebug dbg conn (MySQLM comp) =
 
 -- Rendering aid
 
-renderMySQL :: MySQLSyntax -> Either RenderError (HashSet Text, Query)
+renderMySQL :: MySQLSyntax -> Either RenderError (Query, HashSet Text)
 renderMySQL = \case
   ASelect sql -> renderSelect sql
   AnInsert sql -> renderInsert sql
@@ -353,7 +353,7 @@ processAndLog sql = do
     Left (RenderError typ ast) -> case typ of
       UnsupportedOperation op ->
         throw (OperationNotSupported op ast (pack . show $ sql))
-    Right (tables, stmt@(Query inner)) -> do
+    Right (stmt@(Query inner), tables) -> do
       env <- MySQLM ask
       conn <- case env of
         DebugEnv dbg conn -> do

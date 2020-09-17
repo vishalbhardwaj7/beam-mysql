@@ -253,11 +253,11 @@ renderExpr es = case es of
       bracketWrap r'
   PrefixOperation{} -> do
     op' <- renderPrefOp es.prefOp
-    e' <- renderExpr es.expr
+    e' <- renderExpr es.operand
     pure $ op' <> bracketWrap e'
   PostfixOperation{} -> do
     op' <- renderPostOp es.postOp
-    e' <- renderExpr es.expr
+    e' <- renderExpr es.operand
     pure $ bracketWrap e' <> op'
   NullIf{} -> do
     e' <- renderExpr es.expr

@@ -116,37 +116,6 @@ instance IsSql92SelectTableSyntax MySQLSelectTableSyntax where
   exceptTable _ lOp rOp =
     ExceptTable lOp rOp
 
-{-
--- Used to mark an expression as either pure (meaning, rerunnable any number of
--- times) or impure (side-effecting).
-data Purity = Pure | Impure
- deriving stock (Eq, Show)
-
-instance Semigroup Purity where
-  Pure <> x = x
-  Impure <> _ = Impure
-
-instance Monoid Purity where
-  mempty = Pure
-
-data ExpressionAnn = ExpressionAnn {
-  purity         :: !Purity,
-  parameters     :: {-# UNPACK #-} !(Vector MySQLValueSyntax),
-  tablesInvolved :: !(HashSet Text)
-  }
-  deriving stock (Eq, Show)
-
-instance Semigroup ExpressionAnn where
-  ExpressionAnn p v t <> ExpressionAnn p' v' t' =
-    ExpressionAnn (p <> p') (v <> v') (t <> t')
-
-instance Monoid ExpressionAnn where
-  mempty = ExpressionAnn mempty mempty mempty
-
-fromValue :: MySQLValueSyntax -> ExpressionAnn
-fromValue p = ExpressionAnn Pure (singleton p) mempty
--}
-
 data BinOp =
   LAnd |
   LOr |

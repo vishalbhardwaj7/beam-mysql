@@ -5,49 +5,48 @@
 module Database.Beam.MySQL.Extra where
 
 import           Control.Exception.Safe (bracket, throw)
-import           Control.Monad (void)
+import           Control.Monad ((>=>))
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader (asks)
 import           Data.Foldable (traverse_)
 import           Data.Functor.Identity (Identity)
-import           Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HM
 import           Data.Kind (Type)
 import           Data.Text (Text, pack)
 import           Data.Text.Lazy (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)
-import           Data.Vector (Vector)
-import qualified Data.Vector as V
-import           Database.Beam.Backend.SQL (FromBackendRow, insertCmd,
-                                            runNoReturn)
-import           Database.Beam.MySQL.Connection (MySQL, MySQLM (..),
+import           Data.Vector (Vector, find, foldl1', head, length, mapMaybe,
+                              unfoldrM, zip, (!?))
+import           Database.Beam.Backend.SQL.Row (FromBackendRow)
+import           Database.Beam.MySQL.Connection (MySQL, MySQLM (MySQLM),
                                                  MySQLMEnv (..),
                                                  MySQLStatementError (..),
                                                  acquireStream, drainStream)
-import           Database.Beam.MySQL.Syntax (MySQLSyntax (AnInsert))
-import           Database.Beam.MySQL.Syntax.Insert (MySQLInsert (InsertStmt),
+import           Database.Beam.MySQL.Syntax.Insert (MySQLInsert,
                                                     MySQLInsertValuesSyntax (..))
+import           Database.Beam.MySQL.Syntax.Misc (MySQLFieldNameSyntax (..))
 import           Database.Beam.MySQL.Syntax.Render (RenderError (..),
                                                     RenderErrorType (..),
                                                     renderDelete, renderInsert,
                                                     renderSelect, renderUpdate)
-import           Database.Beam.MySQL.Syntax.Select (MySQLExpressionSyntax (Default),
-                                                    MySQLSelect (..),
+import           Database.Beam.MySQL.Syntax.Select (BinOp (LAnd), CompOp (CEq),
+                                                    MySQLExpressionSyntax (..),
+                                                    MySQLFromSyntax (..),
+                                                    MySQLProjectionSyntax (..),
+                                                    MySQLSelect (SelectStmt),
                                                     MySQLSelectTableSyntax (..),
-                                                    MySQLTableNameSyntax (..),
-                                                    Purity (..),
+                                                    MySQLTableNameSyntax,
+                                                    MySQLTableSourceSyntax (TableNamed),
+                                                    Projection (..),
+                                                    TableHeader (Anonymous),
                                                     TableRowExpression (..))
-import           Database.Beam.Query (SqlDelete (SqlDelete),
-                                      SqlInsert (SqlInsert, SqlInsertNoRows),
-                                      SqlSelect (SqlSelect),
-                                      SqlUpdate (SqlIdentityUpdate, SqlUpdate),
-                                      runInsert, runSelectReturningOne)
+import           Database.Beam.Query (SqlDelete (..), SqlInsert (..),
+                                      SqlSelect (..), SqlUpdate (..),
+                                      runSelectReturningOne)
 import           Database.MySQL.Base (FieldType, MySQLConn,
                                       MySQLValue (MySQLText), Query (Query),
                                       execute_, okAffectedRows)
-import           Prelude hiding (map, read)
+import           Prelude hiding (head, length, read, zip)
 import           System.IO.Streams (InputStream, read)
-import           System.IO.Streams.Combinators (foldM, map)
 
 dumpInsertSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlInsert MySQL table -> Maybe Text
@@ -55,13 +54,13 @@ dumpInsertSQL = \case
   SqlInsertNoRows -> Nothing
   SqlInsert _ ins -> case renderInsert ins of
     Left _                 -> Nothing
-    Right (_, Query query) -> Just . toStrict . decodeUtf8 $ query
+    Right (Query query, _) -> Just . toStrict . decodeUtf8 $ query
 
 dumpSelectSQL :: forall (a :: Type) .
   SqlSelect MySQL a -> Maybe Text
 dumpSelectSQL (SqlSelect sel) = case renderSelect sel of
   Left _                 -> Nothing
-  Right (_, Query query) -> Just . toStrict . decodeUtf8 $ query
+  Right (Query query, _) -> Just . toStrict . decodeUtf8 $ query
 
 dumpUpdateSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlUpdate MySQL table -> Maybe Text
@@ -69,13 +68,13 @@ dumpUpdateSQL = \case
   SqlIdentityUpdate -> Nothing
   SqlUpdate _ upd -> case renderUpdate upd of
     Left _                 -> Nothing
-    Right (_, Query query) -> Just . toStrict . decodeUtf8 $ query
+    Right (Query query, _) -> Just . toStrict . decodeUtf8 $ query
 
 dumpDeleteSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlDelete MySQL table -> Maybe Text
 dumpDeleteSQL (SqlDelete _ del) = case renderDelete del of
   Left _                 -> Nothing
-  Right (_, Query query) -> Just . toStrict . decodeUtf8 $ query
+  Right (Query query, _) -> Just . toStrict . decodeUtf8 $ query
 
 runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
   (FromBackendRow MySQL (table Identity)) =>
@@ -83,111 +82,145 @@ runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
 runInsertRowReturning stmt = case stmt of
   SqlInsertNoRows -> pure Nothing
   SqlInsert _ ins -> case renderInsert ins of
-    Left (RenderError typ ast)         -> case typ of
-      UnsupportedOperation op ->
-        throw (OperationNotSupported op ast (pack . show $ ins))
-    Right (_, query) -> case ins.insertValues of
-      InsertFromSQL{} -> throw . insertIntoSelect $ ins
-      insertExprs -> case V.length insertExprs.rowsToInsert of
+    Left (RenderError typ ast) -> case typ of
+      UnsupportedOperation op -> unsupported op ast ins
+    Right (query, _) -> case ins.insertValues of
+      InsertFromSQL sel -> insertIntoSelect sel ins
+      InsertSQLExpressions rows -> case length rows of
         0 -> pure Nothing -- should be impossible
-        1 -> do
-          let expr = V.head insertExprs.rowsToInsert
-          go ins expr query
-        _ ->
-          throw . multipleRowInserts insertExprs.rowsToInsert $ ins
-  where
-    go ::
-      MySQLInsert ->
-      TableRowExpression ->
-      Query ->
-      MySQLM (Maybe (table Identity))
-    go ins (TableRowExpression v) query = do
-      -- ensure that we have a pure expression
-      traverse_ (analyzeExpr (pack . show $ ins)) v
-      -- if we haven't thrown, proceed
-      let fieldVals = HM.fromList . V.toList . V.zip ins.columns $ v
-      let pkStatement = buildPkQuery ins.tableName.name
-      conn <- getConnection
-      -- get primary key, and what values would change there
-      pkColVals <- getPkColVals conn fieldVals pkStatement
-      -- Determine if we have an autoincrement column, and if so, what it is.
-      mAIColumn <- collectAutoIncrementColumn conn ins.tableName.name
-      -- Run the insert.
-      res <- liftIO . execute_ conn $ query
-      case okAffectedRows res of
-        0 -> pure Nothing -- nothing changed, so nothing to give back
-        _ -> case mAIColumn >>= \aiCol -> HM.lookup aiCol pkColVals of
-          -- If we have no autoincrement column, or the column isn't part of the
-          -- primary key, we can ignore it, and use the primary key directly.
-          Nothing -> do
-            let sel = SqlSelect . SelectStmt mempty -- this gets ignored anyway
-                                             (SelectTableStatement
-                                                mempty -- this gets ignored anyway
-                                                Nothing -- no quantifier needed
-                                                _ -- projection
-                                                _ -- FROM
-                                                _ -- WHERE
-                                                Nothing -- no GROUP BY
-                                                Nothing) -- no HAVING
-                                             mempty -- order doesn't matter
-                                             (Just 1) -- LIMIT 1
-                                             $ Nothing -- no offset
-            runSelectReturningOne sel
-          -- Otherwise, we have to build a fresh select targeting the columns
-          -- that changed, and their values, then query on this.
-          Just _  -> do
-            let sel = SqlSelect . SelectStmt mempty -- this gets ignored anyway
-                                             _
-                                             mempty -- order doesn't matter
-                                             (Just 1) -- LIMIT 1
-                                             $ Nothing -- no offset
-            runSelectReturningOne sel
-          {-
-      case mAIColumn of
-        -- No autoincrement column, so primary key is enough to select changed
-        -- rows.
-        Nothing -> insertNoAutoincrement conn pkColVals query
-        Just aiCol  -> case HM.lookup aiCol pkColVals of
-          -- The autoincrement column isn't part of the primary key, so it
-          -- doesn't matter.
-          Nothing -> insertNoAutoincrement conn pkColVals query
-          Just _ -> do
-            liftIO . void . execute_ conn $ query
-            -- Build a fresh select targeting the values that changed, then
-            -- query on that.
-            let newPKSel = _
-            runSelectReturningOne newPKSel
-            -}
-    insertIntoSelect :: MySQLInsert -> MySQLStatementError
-    insertIntoSelect ins =
-      OperationNotSupported "Insert-into-select with returning"
-                            (pack . show $ ins)
-                            (pack . show $ ins)
-    multipleRowInserts ::
-      Vector TableRowExpression -> MySQLInsert -> MySQLStatementError
-    multipleRowInserts insertExprs ins =
-      OperationNotSupported "Multiple row inserts with returning"
-                            (pack . show $ insertExprs)
-                            (pack . show $ ins)
+        1 -> insertRowReturning ins (head rows) query
+        _ -> multipleRowInserts rows ins
 
 -- Helpers
 
-analyzeExpr :: Text -> MySQLExpressionSyntax -> MySQLM ()
-analyzeExpr t e = case e.ann.purity of
-  Pure -> pure ()
-  Impure -> case e of
-    Default _ -> pure ()
-    _         -> throw . ImpureExpression (pack . show $ e) $ t
+-- Error reporting
 
-buildPkQuery :: Text -> Query
-buildPkQuery nam = Query $
-  "SELECT key_column_usage.column_name " <>
-  "FROM information_schema.key_column_usage " <>
-  "WHERE table_schema = schema() " <>
-  "AND constraint_name = 'PRIMARY' " <>
-  "AND table_name '" <>
-  (encodeUtf8 . fromStrict $ nam) <>
-  "';"
+unsupported :: Text -> Text -> MySQLInsert -> MySQLM a
+unsupported op ast = throw . OperationNotSupported op ast . pack . show
+
+insertIntoSelect :: MySQLSelect -> MySQLInsert -> MySQLM a
+insertIntoSelect sel =
+  throw .
+    OperationNotSupported "Insert-into-select with returning" (pack . show $ sel) .
+    pack .
+    show
+
+multipleRowInserts :: Vector TableRowExpression -> MySQLInsert -> MySQLM a
+multipleRowInserts rows =
+  throw .
+    OperationNotSupported "Multiple row inserts with returning" (pack . show $ rows) .
+    pack .
+    show
+
+impureExpr :: MySQLExpressionSyntax -> MySQLInsert -> MySQLM a
+impureExpr e = throw . ImpureExpression (pack . show $ e) . pack . show
+
+-- Core logic
+
+insertRowReturning :: forall (table :: (Type -> Type) -> Type) .
+  (FromBackendRow MySQL (table Identity)) =>
+  MySQLInsert ->
+  TableRowExpression ->
+  Query ->
+  MySQLM (Maybe (table Identity))
+insertRowReturning ins (TableRowExpression v) query = do
+  -- Ensure that all of our inserted values come from pure expressions
+  traverse_ (analyzeExpr ins) v
+  -- Collect a vector of column names and corresponding values. This _has_ to
+  -- retain the order exactly as specified by the insert, or we risk breaking
+  -- subsequent queries.
+  let fieldVals = zip ins.columns v
+  conn <- getConnection
+  -- Get the names of all primary key columns in the table.
+  pkColNames <- getPkCols conn ins.tableName.name
+  -- Determine if we have an auto-increment column, and if so, what it is
+  mAIColumn <- getAutoIncColumn conn ins.tableName.name
+  -- Run the insert
+  res <- liftIO . execute_ conn $ query
+  case okAffectedRows res of
+    -- This means our insert missed for some reason, so we have nothing to give
+    -- back.
+    0 -> pure Nothing
+    -- The insert hit, so we need to find out what changed.
+    _ -> do
+      -- Build a SELECT on the basis of all our gleaned information
+      let sel =
+            SqlSelect .
+              buildPostSelect ins.tableName fieldVals pkColNames $ mAIColumn
+      -- Execute to get our changes
+      runSelectReturningOne sel
+
+-- Marks the expression as pure (meaning, repeatable any number of times) and
+-- impure (meaning side effecting).
+data Purity = Pure | Impure
+  deriving stock (Eq, Show)
+
+instance Semigroup Purity where
+  Impure <> _ = Impure
+  Pure <> x = x
+
+instance Monoid Purity where
+  mempty = Pure
+
+analyzeExpr :: MySQLInsert -> MySQLExpressionSyntax -> MySQLM ()
+analyzeExpr ins e = case go e of
+  Pure   -> pure ()
+  Impure -> impureExpr e ins
+  where
+    go :: MySQLExpressionSyntax -> Purity
+    go e' = case e' of
+      -- Literals are always pure
+      Value _             -> Pure
+      -- A row is pure if all its components are
+      Row rowEs           -> foldMap go rowEs
+      -- A coalesce operation is pure if all its components are
+      Coalesce coalesceEs -> foldMap go coalesceEs
+      -- A case expression is pure if all its components are. Realistically,
+      -- that makes it a constant, since we either always meet one condition, or
+      -- always meet none.
+      Case{}              ->
+        foldMap (\cb -> go cb.condition <> go cb.action) e'.cases <> go e'.defaultCase
+      -- A field reference is always impure.
+      Field{} -> Impure
+      -- A binary operation is pure if its operands are.
+      BinaryOperation{} -> go e'.lOperand <> go e'.rOperand
+      -- A comparison operation is pure if its operands are.
+      ComparisonOperation{} -> go e'.lOperand <> go e'.rOperand
+      -- A prefix operation is pure if its operand is.
+      PrefixOperation{} -> go e'.operand
+      -- A postfix operation is pure if its operand is.
+      PostfixOperation{} -> go e'.operand
+      -- A NULLIF is pure if both its branches are.
+      NullIf{} -> go e'.expr <> go e'.ifNull
+      -- A POSITION is pure if the needle and haystack are both pure.
+      Position{} -> go e'.needle <> go e'.haystack
+      -- A CAST is pure if the expression being cast is.
+      Cast{} -> go e'.expr
+      -- Field extractions from pure expressions are pure.
+      Extract{} -> go e'.expr
+      -- CURRENT_TIMESTAMP is pure within a transaction, which we assume we're
+      -- in, as runInsertRowReturning is unsafe outside one.
+      CurrentTimestamp -> Pure
+      -- DEFAULT cannot be assumed pure in general after MySQL 8.0.13. Given
+      -- that we're not on this version, we're safe.
+      Default -> Pure
+      -- IN expressions are pure if all their components are.
+      In{} -> foldMap go e'.exprs <> go e'.expr
+      -- BETWEEN is pure if all its components are.
+      Between{} -> go e'.expr <> go e'.lo <> go e'.hi
+      -- Anything involving sub-SELECTs is assumed impure. This is a bit crude,
+      -- but realistic analysis of these would be too hard for our goals.
+      Exists{} -> Impure
+      Unique{} -> Impure
+      Subquery{} -> Impure
+      -- Any aggregation is pure, provided the expression being aggregated on
+      -- is.
+      CountAll -> Pure
+      Aggregation{} -> go e'.expr
+      -- CONCAT is pure if all expressions being concatenated are.
+      Concat concatEs -> foldMap go concatEs
+      -- This should never come up, since beam never constructs this
+      LastInsertId -> Impure
 
 getConnection :: MySQLM MySQLConn
 getConnection = MySQLM (asks go)
@@ -197,279 +230,85 @@ getConnection = MySQLM (asks go)
       DebugEnv _ c -> c
       ReleaseEnv c -> c
 
-getPkColVals ::
-  MySQLConn ->
-  HashMap Text MySQLExpressionSyntax ->
-  Query ->
-  MySQLM (HashMap Text MySQLExpressionSyntax)
-getPkColVals conn fieldVals query =
+getPkCols :: MySQLConn -> Text -> MySQLM (Vector Text)
+getPkCols conn nam = do
+  let query = Query $
+        "SELECT key_column_usage.column_name " <>
+        "FROM information_schema.key_column_usage " <>
+        "WHERE table_schema = schema () " <>
+        "AND constraint_name = 'PRIMARY' " <>
+        "AND table_name '" <>
+        (encodeUtf8 . fromStrict $ nam) <>
+        ";"
   bracket (acquireStream conn query)
           drainStream
-          (liftIO . foldM go HM.empty)
+          (liftIO . unfoldrM go)
   where
     go ::
-      HashMap Text MySQLExpressionSyntax ->
-      Vector (FieldType, MySQLValue) ->
-      IO (HashMap Text MySQLExpressionSyntax)
-    go acc v = case v V.!? 0 of
-      Just (_, MySQLText t) -> case HM.lookup t fieldVals of
-        Nothing  -> pure acc
-        Just val -> pure . HM.insert t val $ acc
-      -- This outcome is literally impossible. If this happens, it's enough of a
-      -- bug that we _should_ crash.
-      _ -> error "Column name was not text."
+      InputStream (Vector (FieldType, MySQLValue)) ->
+      IO (Maybe (Text, InputStream (Vector (FieldType, MySQLValue))))
+    go stream = do
+      res <- read stream
+      pure $ (, stream) <$> (res >>= (!? 0) >>= extractText)
 
-collectAutoIncrementColumn :: MySQLConn -> Text -> MySQLM (Maybe Text)
-collectAutoIncrementColumn conn nam = do
-  let aiQuery = Query $
+getAutoIncColumn :: MySQLConn -> Text -> MySQLM (Maybe Text)
+getAutoIncColumn conn nam = do
+  let query = Query $
         "SELECT column_name " <>
         "FROM information_schema.columns " <>
         "WHERE table_schema = schema() " <>
         "AND table_name = '" <>
         (encodeUtf8 . fromStrict $ nam) <>
-        "' AND extra LIKE 'auto_increment';"
-  bracket (acquireStream conn aiQuery)
-          drainStream
-          (liftIO . go)
-  where
-    go ::
-      InputStream (Vector (FieldType, MySQLValue)) ->
-      IO (Maybe Text)
-    go stream = do
-      res <- read stream
-      case (V.!? 0) =<< res of
-        Just (_, MySQLText aic) -> pure . Just $ aic
-        _                       -> pure Nothing
-
-    {-
-  where
-    go ::
-      MySQLInsert ->
-      MySQLTableNameSyntax ->
-      Vector Text ->
-      TableRowExpression ->
-      MySQLM (Maybe (table Identity))
-    go ins tableName' fields (TableRowExpression v) = do
-      -- ensure that we have a pure expression
-      traverse_ (analyzeExpr textified) v
-      -- if we haven't thrown, we can proceed
-      let fieldVals = HM.fromList . V.toList . V.zip fields $ v
-      -- get primary key, and what values would change there
-      let pkStatement = buildPkQuery tableName'
-      conn <- callDownConnection
-      pkColVals <- getPkColVals conn fieldVals pkStatement
-      mAIColumn <- collectAutoIncrementColumn conn tableName'
-      case mAIColumn of
-        -- No autoincrement column, so primary key is enough to select changed
-        -- rows.
-        Nothing -> insertNoAutoincrement conn pkColVals ins
-        Just aiCol -> case HM.lookup aiCol pkColVals of
-          -- The autoincrement column isn't part of the primary key, so it
-          -- doesn't matter.
-          Nothing -> insertNoAutoincrement conn pkColVals ins
-          Just _  -> do
-            runInsert stmt
-            -- This is a gory hack.
-            let newPKs = getNewPKs aiCol pkColVals
-            selectByPKCols newPKs
-    textified :: Text
-    textified = pack . show . dumpInsertSQL $ stmt
-
--- Helpers
-
-analyzeExpr :: Text -> MySQLExpressionSyntax -> MySQLM ()
-analyzeExpr textified expr = case expr.ann.purity of
-  Pure   -> pure ()
-  Impure -> case expr of
-    Default _ -> pure ()
-    _         -> throw . ImpureExpression (pack . show $ expr) $ textified
-
-buildPkQuery :: MySQLTableNameSyntax -> Query
-buildPkQuery (TableName _ nam) = Query $
-  "SELECT key_column_usage.column_name " <>
-  "FROM information_schema.key_column_usage " <>
-  "WHERE table_schema = schema() " <>
-  "AND constraint_name = 'PRIMARY' " <>
-  "AND table_name '" <>
-  (encodeUtf8 . fromStrict $ nam) <>
-  "';"
-
-callDownConnection :: MySQLM MySQLConn
-callDownConnection = do
-  env <- MySQLM ask
-  case env of
-    DebugEnv _ c -> pure c
-    ReleaseEnv c -> pure c
-
-getPkColVals :: forall (a :: Type) .
-  MySQLConn -> HashMap Text a -> Query -> MySQLM (HashMap Text a)
-getPkColVals conn fieldVals query =
+        "' AND extra LIKE 'auto_increment' " <>
+        "LIMIT 1;"
   bracket (acquireStream conn query)
           drainStream
-          go
+          (liftIO . fmap ((>>= (!? 0)) >=> extractText) . read)
+
+extractText :: (FieldType, MySQLValue) -> Maybe Text
+extractText (_, val) = case val of
+  MySQLText t -> pure t
+  _           -> Nothing
+
+buildPostSelect ::
+  MySQLTableNameSyntax ->
+  Vector (Text, MySQLExpressionSyntax) ->
+  Vector Text ->
+  Maybe Text ->
+  MySQLSelect
+buildPostSelect nam fieldVals pkCols mAICol =
+  -- Order doesn't matter, LIMIT 1, no offset
+  SelectStmt selTable mempty (Just 1) Nothing
   where
-    go ::
-      InputStream (Vector (FieldType, MySQLValue)) ->
-      MySQLM (HashMap Text a)
-    go stream = liftIO $ do
-      stream' <- map (V.map snd) stream
-      foldM go2 HM.empty stream'
-    go2 :: HashMap Text a -> Vector MySQLValue -> IO (HashMap Text a)
-    go2 acc v = case v V.!? 0 of
-      Just (MySQLText t) -> case HM.lookup t fieldVals of
-        Nothing  -> pure acc
-        Just val -> pure . HM.insert t val $ acc
-      -- This outcome is literally impossible. If it happens, it's enough of a
-      -- bug that we _should_ crash.
-      _                  -> error "Column name was not text."
-
-collectAutoIncrementColumn ::
-  MySQLConn -> MySQLTableNameSyntax -> MySQLM (Maybe Text)
-collectAutoIncrementColumn conn tableName' = do
-  let aiQuery = Query $
-        "SELECT column_name " <>
-        "FROM information_schema.columns " <>
-        "WHERE table_schema = schema() " <>
-        "AND table_anem = '" <>
-        (encodeUtf8 . fromStrict $ tableName'.name) <>
-        "' AND extra LIKE 'auto_increment';"
-  bracket (acquireStream conn aiQuery)
-          drainStream
-          go
-  where
-    go ::
-      InputStream (Vector (FieldType, MySQLValue)) ->
-      MySQLM (Maybe Text)
-    go stream = liftIO $ do
-      res <- read stream
-      case (V.!? 0) =<< res of
-        Just (_, MySQLText aic) -> pure . Just $ aic
-        _                       -> pure Nothing
-
-insertNoAutoincrement ::
-  MySQLConn ->
-  HashMap Text MySQLExpressionSyntax ->
-  MySQLInsert ->
-  MySQLM (Maybe (table Identity))
-insertNoAutoincrement conn pkColVals ins = do
-  let insertStatement = _ ins
-  res <- liftIO . execute_ conn $ insertStatement
-  case okAffectedRows res of
-    0 -> pure Nothing -- query had no effect, so nothing to give
-    _ -> selectByPKCols pkColVals
-
-getNewPKs :: Text -> HashMap Text MySQLExpressionSyntax -> _
-getNewPKs = _
-
-selectByPKCols :: _ -> MySQLM (Maybe (table Identity))
-selectByPKCols = _
--}
-
-{-
-runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
-  (FromBackendRow MySQL (table Identity)) =>
-  SqlInsert MySQL table -> MySQLM (Maybe (table Identity))
-runInsertRowReturning = \case
-  SqlInsertNoRows -> pure Nothing
-  SqlInsert _ ins@(Insert tableName fields values) -> case values of
-    FromSQL _ -> fail "Not implemented for INSERT INTO ... SELECT ..."
-    FromExprs [] -> pure Nothing -- should be impossible
-    FromExprs [expr] -> do
-      let fieldVals = HM.fromList . zip fields $ expr
-      -- get primary key and what values would change there
-      let pkStatement = buildPkQuery tableName
-      conn <- (\case DebugEnv _ c -> c
-                     ReleaseEnv c -> c) <$>MySQLM ask
-      pkColVals <-
-        bracket (acquireStream conn pkStatement)
-                drainStream
-                (\stream -> liftIO (map (V.map snd) stream >>=
-                              foldM (go fieldVals) HM.empty))
-      let MysqlTableNameSyntax _ nameOfTable = tableName
-      mAutoincCol <- collectAutoIncrementCol conn nameOfTable
-      case mAutoincCol of
-        -- No autoincrementing column, so primary key is enough to select
-        -- changed rows.
-        Nothing         -> insertReturningWithoutAutoinc conn pkColVals
-        Just autoincCol -> case HM.lookup autoincCol pkColVals of
-          -- The autoincrementing column isn't part of the primary key, so it
-          -- doesn't matter.
-          Nothing -> insertReturningWithoutAutoinc conn pkColVals
-          Just _  -> do
-            let insertStatement = insertCmd ins
-            void . liftIO . execute_ conn . intoQuery $ insertStatement
-            -- This is a gory hack.
-            let newPKs = HM.mapWithKey (regraft autoincCol) pkColVals
-            selectByPrimaryKeyCols newPKs
-    _ -> fail "Cannot insert several rows with runInsertRowReturning"
-    where
-      buildPkQuery :: MysqlTableNameSyntax -> Query
-      buildPkQuery (MysqlTableNameSyntax _ name) = Query (
-        "SELECT key_column_usage.column_name " <>
-        "FROM information_schema.key_column_usage " <>
-        "WHERE table_schema = schema() " <>
-        "AND constraint_name = 'PRIMARY' " <>
-        "AND table_name = '" <>
-        (encodeUtf8 . fromStrict $ name) <>
-        "';")
-      go :: HashMap Text v -> HashMap Text v -> Vector MySQLValue -> IO (HashMap Text v)
-      go fieldVals acc v = do
-        colName <- extractColName v
-        case HM.lookup colName fieldVals of
-          Nothing  -> pure acc
-          Just val -> pure . HM.insert colName val $ acc
-      extractColName :: Vector MySQLValue -> IO Text
-      extractColName v = case V.head v of
-        MySQLText t -> pure t
-        _           -> fail "Column name was not text"
-      selectByPrimaryKeyCols ::
-        HashMap Text MysqlSyntax -> MySQLM (Maybe (table Identity))
-      selectByPrimaryKeyCols pkColVals = do
-        let queryStatement = SqlSelect . buildPkMatchQuery $ pkColVals
-        runSelectReturningOne queryStatement
-      fieldsExpr :: MysqlSyntax
-      fieldsExpr =
-        fold . intersperse ", " . fmap (backtickWrap . textSyntax) $ fields
-      buildPkMatchQuery :: HashMap Text MysqlSyntax -> MysqlSyntax
-      buildPkMatchQuery pkColVals =
-        "SELECT " <>
-        fieldsExpr <>
-        " FROM " <>
-        intoTableName tableName <>
-        " WHERE " <>
-        (fold . intersperse " AND" . fmap fromPair . HM.toList $ pkColVals) <>
-        ";"
-      fromPair :: (Text, MysqlSyntax) -> MysqlSyntax
-      fromPair (colName, val) = textSyntax colName <> " = " <> val
-      collectAutoIncrementCol :: MySQLConn -> Text -> MySQLM (Maybe Text)
-      collectAutoIncrementCol conn nameOfTable = do
-        let autoIncQuery = Query (
-              "SELECT `column_name` " <>
-              "FROM `information_schema`.`columns` " <>
-              "WHERE `table_schema` = schema() " <>
-              "AND `table_name` = '" <>
-              (encodeUtf8 . fromStrict $ nameOfTable) <>
-              "' AND `extra` LIKE 'auto_increment';"
-              )
-        bracket (acquireStream conn autoIncQuery)
-                drainStream
-                (\stream -> liftIO $ do
-                    res <- read stream
-                    case (V.!? 0) =<< res of
-                      Just (_, MySQLText aic) -> pure . Just $ aic
-                      _                       -> pure Nothing)
-      insertReturningWithoutAutoinc ::
-        MySQLConn ->
-        HashMap Text MysqlSyntax ->
-        MySQLM (Maybe (table Identity))
-      insertReturningWithoutAutoinc conn pkColVals = do
-        let insertStatement = insertCmd ins
-        res <- liftIO . execute_ conn . intoQuery $ insertStatement
-        case okAffectedRows res of
-          0 -> pure Nothing
-          _ -> selectByPrimaryKeyCols pkColVals
-      regraft :: Text -> Text -> MysqlSyntax -> MysqlSyntax
-      regraft autoincCol pkName pkValue =
-        if pkName == autoincCol && pkValue == defaultE
-        then "last_insert_id()"
-        else pkValue -}
+    selTable :: MySQLSelectTableSyntax
+    selTable =
+      SelectTableStatement
+        Nothing -- no quantifier
+        fieldsOf
+        (Just . FromTable ourName $ Anonymous)
+        (Just onPKVals)
+        Nothing -- no GROUP BY
+        Nothing -- no HAVING
+    fieldsOf :: MySQLProjectionSyntax
+    fieldsOf = ProjectExpressions . fmap (projectField . fst) $ fieldVals
+    projectField :: Text -> Projection
+    projectField t = Projection (Field . UnqualifiedField $ t) Nothing
+    ourName :: MySQLTableSourceSyntax
+    ourName = TableNamed nam
+    onPKVals :: MySQLExpressionSyntax
+    onPKVals =
+      foldl1' (BinaryOperation LAnd) .
+        mapMaybe (uncurry fieldEqExpr) $ fieldVals
+    fieldEqExpr :: Text -> MySQLExpressionSyntax -> Maybe MySQLExpressionSyntax
+    fieldEqExpr f e = do
+      -- if it's not a primary key column, we ignore it
+      _ <- find (f ==) pkCols
+      rOp <- case (f ==) <$> mAICol of
+              -- if the autoincrementing column is in our primary key, replace
+              -- its DEFAULT with last_insert_id()
+              Just True -> pure LastInsertId
+              -- if we don't have an autoincrementing column in our primary key,
+              -- or this isn't it, just paste the value as-was
+              _         -> pure e
+      let lOp = Field . UnqualifiedField $ f
+      pure . ComparisonOperation CEq Nothing lOp $ rOp
