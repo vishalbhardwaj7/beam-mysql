@@ -25,7 +25,7 @@ main = hspec $ do
   describe "'\\' in generated SQL" $ do
     it "should be escaped in INSERT VALUES literals" $
       dumpInsertSQL insertStmt `shouldBe`
-        Just "INSERT INTO `test_table`(text) VALUES ('foo\\\"');"
+        Just "INSERT INTO `test_table` (text) VALUES ('foo\\\"');"
     it "should be escaped in SELECT WHERE literals" $
       dumpSelectSQL selectWhereStmt `shouldBe`
         Just "SELECT `t0`.`text` AS `res0` FROM `test_table` AS `t0` WHERE (`t0`.`text`) = ('foo\\\"');"
