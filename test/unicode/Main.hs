@@ -1,17 +1,26 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE TypeFamilies   #-}
+
 module Main (main) where
 
 import           Control.Exception.Safe (bracket)
 import           Data.Foldable (traverse_)
+import           Data.Functor.Identity (Identity)
+import           Data.Int (Int64)
+import           Data.Kind (Type)
 import           Data.Text (Text)
-import           Data.Vector (Vector)
-import qualified Data.Vector as V
-import           Database.MySQL.Base (ColumnDef, MySQLConn,
-                                      MySQLValue (MySQLText), Query (Query),
-                                      close, connect, execute_, queryVector_,
-                                      skipToEof)
+import           Data.Vector (Vector, fromList, imap, toList)
+import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
+                                Table (PrimaryKey, primaryKey), TableEntity,
+                                defaultDbSettings)
+import           Database.Beam.MySQL (MySQL, runBeamMySQL)
+import           Database.Beam.Query (QExpr, SqlInsertValues, all_, asc_,
+                                      insert, insertValues, orderBy_, runInsert,
+                                      runSelectReturningList, select)
+import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
+                                      execute_)
 import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
-import           System.IO.Streams (InputStream)
-import qualified System.IO.Streams as Stream
+import           GHC.Generics (Generic)
 import           Test.Hspec (Spec, describe, hspec, it, shouldBe)
 
 main :: IO ()
@@ -19,45 +28,75 @@ main = do
   res <- withTempDB go
   hspec . spec $ res
   where
-    go :: MySQLDB -> IO Text
+    go :: MySQLDB -> IO (Vector Text)
     go db = bracket (connect . toConnectInfo $ db)
                     close
-                    (\conn -> setUpDB conn >>
-                              runQuery conn)
+                    (\conn -> setUpDB conn >> insertSample conn >> retrieveSample conn)
 
 -- Helpers
 
-spec :: Text -> Spec
-spec res = describe "Inserting Unicode into Latin-1 table" $ do
-  it "should round-trip assuming UTF-8 connection" $ do
-    res `shouldBe` "傍目八目"
+spec :: Vector Text -> Spec
+spec v = describe "Unicode round-tripping" $ do
+  it "should round-trip properly" $ do
+    v `shouldBe` sampleData
+
+sampleData :: Vector Text
+sampleData = fromList [
+  "傍目八目",
+  "悪因悪果",
+  "異体同心"
+  ]
 
 setUpDB :: MySQLConn -> IO ()
 setUpDB conn = traverse_ (execute_ conn) [
   "create database test;",
   "use test",
-  makeTable,
-  insertJapanese
-  ]
+  makeTestTable]
   where
-    makeTable :: Query
-    makeTable = Query $
+    makeTestTable :: Query
+    makeTestTable = Query $
       "create table test_table (" <>
-      "data varchar(255) not null primary key) " <>
-      "default charset=latin1;"
-    insertJapanese :: Query
-    insertJapanese = Query
-      "insert into test_table (data) values ('傍目八目');"
+      "id bigint primary key not null, " <>
+      "data varchar(255) not null);"
 
-runQuery :: MySQLConn -> IO Text
-runQuery conn = bracket (queryVector_ conn "select * from test_table;")
-                        (skipToEof . snd)
-                        go
+insertSample :: MySQLConn -> IO ()
+insertSample conn =
+  runBeamMySQL conn . runInsert . insert (_testTestTable testDB) $ go
   where
-    go :: (Vector ColumnDef, InputStream (Vector MySQLValue)) -> IO Text
-    go (_, stream) = do
-      res <- Stream.read stream
-      case (V.!? 0) =<< res of
-        Nothing            -> fail "Query missed"
-        Just (MySQLText t) -> pure t
-        _                  -> fail "Unexpected result type."
+    go :: SqlInsertValues MySQL (TestT (QExpr MySQL s))
+    go = insertValues . toList . imap buildTestT $ sampleData
+    buildTestT :: Int -> Text -> TestT Identity
+    buildTestT i = TestT (fromIntegral i)
+
+retrieveSample :: MySQLConn -> IO (Vector Text)
+retrieveSample conn =
+  fmap fromList . runBeamMySQL conn . runSelectReturningList . select $ do
+    res <- orderBy_ (asc_ . _testId) . all_ . _testTestTable $ testDB
+    pure . _testData $ res
+
+-- Beam boilerplate
+
+data TestT (f :: Type -> Type) = TestT
+  {
+    _testId   :: Columnar f Int64,
+    _testData :: Columnar f Text
+  }
+  deriving stock (Generic)
+  deriving anyclass (Beamable)
+
+instance Table TestT where
+  data PrimaryKey TestT (f :: Type -> Type) =
+    TestTPK (Columnar f Int64)
+    deriving stock (Generic)
+    deriving anyclass (Beamable)
+  primaryKey = TestTPK . _testId
+
+newtype TestDB (f :: Type -> Type) = TestDB
+  {
+    _testTestTable :: f (TableEntity TestT)
+  }
+  deriving stock (Generic)
+  deriving anyclass (Database MySQL)
+
+testDB :: DatabaseSettings MySQL TestDB
+testDB = defaultDbSettings

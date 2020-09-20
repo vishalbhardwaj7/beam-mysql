@@ -7,11 +7,12 @@ module Database.Beam.MySQL.FromField where
 
 import           Data.Bits (Bits (zeroBits), toIntegralSized)
 import           Data.ByteString (ByteString)
+import qualified Data.ByteString.Char8 as Char8
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
 import           Data.Scientific (Scientific, toBoundedInteger)
 import           Data.Text (Text, pack, unpack)
-import           Data.Text.Encoding (encodeUtf8)
+import           Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Time (Day, LocalTime (LocalTime), TimeOfDay, midnight)
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (SqlNull (SqlNull))
@@ -180,7 +181,7 @@ instance FromFieldStrict ByteString where
 instance FromFieldStrict Text where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v -> Right v
+    MySQLText v -> Right . decodeUtf8 . encodeLatin1 $ v
     v -> handleNullOrMismatch v
 
 instance FromFieldStrict LocalTime where
@@ -448,3 +449,7 @@ tyCon :: forall (a :: Type) .
   (Typeable a) =>
   TyCon
 tyCon = typeRepTyCon (typeRep @a)
+
+-- Reverse-engineered from description of decodeLatin1
+encodeLatin1 :: Text -> ByteString
+encodeLatin1 = Char8.pack . unpack
