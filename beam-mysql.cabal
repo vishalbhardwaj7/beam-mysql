@@ -187,6 +187,12 @@ test-suite text-escaping
   main-is:        Main.hs
   hs-source-dirs: test/text-escaping
 
+test-suite bobby-tables
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/bobby-tables
+
 test-suite unicode
   import:         common-test
   type:           exitcode-stdio-1.0
