@@ -1,6 +1,7 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE RankNTypes     #-}
-{-# LANGUAGE TypeFamilies   #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE RankNTypes         #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies       #-}
 
 module Main (main) where
 
@@ -15,14 +16,13 @@ import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 defaultDbSettings)
 import           Database.Beam.MySQL (MySQL, runBeamMySQL,
                                       runInsertRowReturning)
-import           Database.Beam.Query (QExpr, SqlInsertValues, default_, insert,
-                                      insertExpressions, insertValues,
-                                      runInsert, val_)
+import           Database.Beam.Query (QExpr, SqlInsert, default_, insert,
+                                      insertExpressions, insertValues, val_)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
 import           Database.MySQL.Temp (toConnectInfo, withTempDB)
 import           GHC.Generics (Generic)
-import           Test.Hspec (SpecWith, beforeAll, hspec)
+import           Test.Hspec (SpecWith, beforeAll, describe, hspec, it, shouldBe)
 
 main :: IO ()
 main =
@@ -34,12 +34,8 @@ main =
     go conn = do
       setUpDB conn
       hspec $ do
-        beforeAll (pkAiHit conn) pkAiHitSpec
-        beforeAll (pkAiMiss conn) pkAiMissSpec
-        -- beforeAll (pkNoAiHit conn) _
-        -- beforeAll (pkNoAiMiss conn) _
-        -- beforeAll (pkPlusAiHit conn) _
-        -- beforeAll (pkPlusAiMiss conn) _
+        beforeAll (queryPkAi conn) pkAiSpec
+        beforeAll (queryPkNoAi conn) pkNoAiSpec
 
 -- Helpers
 
@@ -48,8 +44,7 @@ setUpDB conn = traverse_ (execute_ conn) [
   "create database test;",
   "use test",
   makePkAi,
-  makePkNoAi,
-  makePkPlusAi
+  makePkNoAi
   ]
   where
     makePkAi :: Query
@@ -60,37 +55,32 @@ setUpDB conn = traverse_ (execute_ conn) [
     makePkNoAi :: Query
     makePkNoAi = Query $
       "create table pknoai (" <>
-      "id bigint primary key, " <>
-      "data varchar(255) not null);"
-    makePkPlusAi :: Query
-    makePkPlusAi = Query $
-      "create table pkplusai (" <>
       "id varchar(255) primary key, " <>
-      "incrementer bigint not null auto_increment, " <>
       "data varchar(255) not null);"
 
-pkAiHit :: MySQLConn -> IO (Maybe (PkAiT Identity))
-pkAiHit conn =
-  runBeamMySQL conn . runInsertRowReturning . insert (_testPkai testDB) $ go
+queryPkAi :: MySQLConn -> IO (Maybe (PkAiT Identity))
+queryPkAi conn = runBeamMySQL conn . runInsertRowReturning $ go
   where
-    go :: SqlInsertValues MySQL (PkAiT (QExpr MySQL s))
-    go = insertExpressions oneRow
-    oneRow :: forall s' . [PkAiT (QExpr MySQL s')]
-    oneRow = [PkAiT default_ (val_ "foo")]
+    go :: SqlInsert MySQL PkAiT
+    go = insert (_testPkai testDB) (insertExpressions withDefault)
+    withDefault :: forall s . [PkAiT (QExpr MySQL s)]
+    withDefault = [PkAiT default_ (val_ "foo")]
 
-pkAiMiss :: MySQLConn -> IO (Maybe (PkAiT Identity))
-pkAiMiss conn = runBeamMySQL conn $ do
-  runInsert . insert (_testPkai testDB) $ go
-  runInsertRowReturning . insert (_testPkai testDB) $ go
+queryPkNoAi :: MySQLConn -> IO (Maybe (PkNoAiT Identity))
+queryPkNoAi conn = runBeamMySQL conn . runInsertRowReturning $ go
   where
-    go :: SqlInsertValues MySQL (PkAiT (QExpr MySQL s))
-    go = insertValues [PkAiT 100 "bar"]
+    go :: SqlInsert MySQL PkNoAiT
+    go = insert (_testPknoai testDB) (insertValues [PkNoAiT "foo" "bar"])
 
-pkAiHitSpec :: SpecWith (Maybe (PkAiT Identity))
-pkAiHitSpec = _
+pkAiSpec :: SpecWith (Maybe (PkAiT Identity))
+pkAiSpec = describe "Autoincrement primary key table inserts" $ do
+  it "should return on success" $ \res -> do
+    res `shouldBe` Just (PkAiT 1 "foo")
 
-pkAiMissSpec :: SpecWith (Maybe (PkAiT Identity))
-pkAiMissSpec = _
+pkNoAiSpec :: SpecWith (Maybe (PkNoAiT Identity))
+pkNoAiSpec = describe "Ordinary table inserts" $
+  it "should return on success" $ \res -> do
+    res `shouldBe` Just (PkNoAiT "foo" "bar")
 
 -- Beam boilerplate
 
@@ -101,6 +91,10 @@ data PkAiT (f :: Type -> Type) = PkAiT
   }
   deriving stock (Generic)
   deriving anyclass (Beamable)
+
+deriving stock instance Eq (PkAiT Identity)
+
+deriving stock instance Show (PkAiT Identity)
 
 instance Table PkAiT where
   data PrimaryKey PkAiT (f :: Type -> Type) =
@@ -117,6 +111,10 @@ data PkNoAiT (f :: Type -> Type) = PkNoAiT
   deriving stock (Generic)
   deriving anyclass (Beamable)
 
+deriving stock instance Eq (PkNoAiT Identity)
+
+deriving stock instance Show (PkNoAiT Identity)
+
 instance Table PkNoAiT where
   data PrimaryKey PkNoAiT (f :: Type -> Type) =
     PkNoAiPK (Columnar f Text)
@@ -124,27 +122,10 @@ instance Table PkNoAiT where
     deriving anyclass (Beamable)
   primaryKey = PkNoAiPK . _pknoaiId
 
-data PkPlusAiT (f :: Type -> Type) = PkPlusAiT
-  {
-    _pkplusaiId          :: Columnar f Text,
-    _pkplusaiIncrementer :: Columnar f Int64,
-    _pkplusaiData        :: Columnar f Text
-  }
-  deriving stock (Generic)
-  deriving anyclass (Beamable)
-
-instance Table PkPlusAiT where
-  data PrimaryKey PkPlusAiT (f :: Type -> Type) =
-    PkPlusAiPK (Columnar f Text)
-    deriving stock (Generic)
-    deriving anyclass (Beamable)
-  primaryKey = PkPlusAiPK . _pkplusaiId
-
 data TestDB (f :: Type -> Type) = TestDB
   {
-    _testPkai     :: f (TableEntity PkAiT),
-    _testPknoai   :: f (TableEntity PkNoAiT),
-    _testPkplusai :: f (TableEntity PkPlusAiT)
+    _testPkai   :: f (TableEntity PkAiT),
+    _testPknoai :: f (TableEntity PkNoAiT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
