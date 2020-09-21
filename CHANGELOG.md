@@ -6,11 +6,12 @@
 * Added support for a lenient mode (see LENIENT.md)
 * Reintroduce `runInsertRowReturning`
 * Improve error messages
-* Rewrite benchmarks using gauge
+* Rewrite benchmarks using Criterion
 * Ensure proper escaping of `Text` values
 * Add `dumpInsertSQL`, `dumpSelectSQL`, `dumpDeleteSQL`, `dumpUpdateSQL` for 
   debugging SQL query generator output
 * Restructure internal SQL AST representation
+* Many more tests
 
 ## 1.0.0.0
 
