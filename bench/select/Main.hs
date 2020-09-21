@@ -5,6 +5,7 @@ module Main (main) where
 
 import           Control.Exception.Safe (bracket)
 import           Control.Monad (void)
+import           Criterion.Main (bench, defaultMain, nfIO)
 import           Data.Foldable (traverse_)
 import           Data.Functor.Identity (Identity)
 import           Data.Text (Text)
@@ -19,7 +20,6 @@ import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_, queryVector_, skipToEof)
 import           Database.MySQL.Temp (toConnectInfo, withTempDB)
 import           Fmt (Builder, padLeftF, (+|), (|+))
-import           Gauge (bench, defaultMain, nfIO)
 import           GHC.Generics (Generic)
 
 main :: IO ()

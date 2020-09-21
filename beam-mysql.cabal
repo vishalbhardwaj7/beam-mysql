@@ -65,8 +65,8 @@ common common-bench
   build-depends:
     , beam-core
     , beam-mysql
+    , criterion   ^>=1.5.6.2
     , fmt
-    , gauge       ^>=0.2.5
     , mysql-temp
 
 common common-test
