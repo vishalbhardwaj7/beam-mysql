@@ -194,6 +194,12 @@ test-suite unicode
   build-depends:  vector
   hs-source-dirs: test/unicode
 
+test-suite run-insert-returning
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/run-insert-returning
+
 test-suite bad-schemata
   import:         common-test
   type:           exitcode-stdio-1.0
