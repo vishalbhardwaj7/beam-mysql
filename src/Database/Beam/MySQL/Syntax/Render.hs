@@ -49,9 +49,8 @@ import           Database.MySQL.Protocol.Escape (escapeBytes, escapeText)
 import           Mason.Builder (BuilderFor, LazyByteStringBackend, byteString,
                                 int16Dec, int32Dec, int64Dec, int8Dec,
                                 integerDec, intersperse, lazyByteString,
-                                stringUtf8, textUtf8, toLazyByteString,
-                                word16Dec, word32Dec, word64Dec, word8Dec,
-                                wordDec)
+                                textUtf8, toLazyByteString, word16Dec,
+                                word32Dec, word64Dec, word8Dec, wordDec)
 import           Prelude hiding (length)
 
 newtype RenderErrorType = UnsupportedOperation Text
@@ -465,11 +464,26 @@ renderValue = \case
     let t' = decodeLatin1 . encodeUtf8 . escapeText $ t
     pure . quoteWrap . textUtf8 $ t'
   VDay d ->
-    pure . quoteWrap . stringUtf8 . formatTime defaultTimeLocale "%F" $ d
+    pure .
+      quoteWrap .
+      textUtf8 .
+      escapeText .
+      pack .
+      formatTime defaultTimeLocale "%F" $ d
   VLocalTime lt ->
-    pure. quoteWrap . stringUtf8 . formatTime defaultTimeLocale "%F %T%Q" $ lt
+    pure.
+      quoteWrap .
+      textUtf8 .
+      escapeText .
+      pack .
+      formatTime defaultTimeLocale "%F %T%Q" $ lt
   VTimeOfDay tod ->
-    pure . quoteWrap . stringUtf8 . formatTime defaultTimeLocale "%T%Q" $ tod
+    pure .
+      quoteWrap .
+      textUtf8 .
+      escapeText .
+      pack .
+      formatTime defaultTimeLocale "%T%Q" $ tod
 
 renderGrouping :: MySQLGroupingSyntax -> RenderM Builder
 renderGrouping (GroupByExpressions es) =
