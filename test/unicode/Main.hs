@@ -4,11 +4,13 @@
 module Main (main) where
 
 import           Control.Exception.Safe (bracket)
+import           Data.Char (GeneralCategory (NotAssigned, PrivateUse),
+                            generalCategory)
 import           Data.Foldable (traverse_)
 import           Data.Functor.Identity (Identity)
 import           Data.Int (Int64)
 import           Data.Kind (Type)
-import           Data.Text (Text)
+import           Data.Text (Text, chunksOf, filter, pack)
 import           Data.Vector (Vector, fromList, imap, toList)
 import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 Table (PrimaryKey, primaryKey), TableEntity,
@@ -21,6 +23,7 @@ import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
 import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
 import           GHC.Generics (Generic)
+import           Prelude hiding (filter)
 import           Test.Hspec (Spec, describe, hspec, it, shouldBe)
 
 main :: IO ()
@@ -40,12 +43,16 @@ spec v = describe "Unicode round-tripping" $ do
   it "should round-trip properly" $ do
     v `shouldBe` sampleData
 
+-- every valid Unicode code point, in chunks of 32
 sampleData :: Vector Text
-sampleData = fromList [
-  "傍目八目",
-  "悪因悪果",
-  "異体同心"
-  ]
+sampleData =
+  fromList . chunksOf 32 . filter go . pack $ [minBound .. maxBound]
+  where
+    go :: Char -> Bool
+    go c = case generalCategory c of
+      NotAssigned -> False
+      PrivateUse  -> False
+      _           -> True
 
 setUpDB :: MySQLConn -> IO ()
 setUpDB conn = traverse_ (execute_ conn) [
@@ -60,8 +67,18 @@ setUpDB conn = traverse_ (execute_ conn) [
       "data varchar(255) not null);"
 
 insertSample :: MySQLConn -> IO ()
-insertSample conn =
-  runBeamMySQL conn . runInsert . insert (_testTestTable testDB) $ go
+{-
+insertSample conn = do
+  let ixedData = imap (TestT . fromIntegral) sampleData
+  traverse_ go ixedData
+  where
+    go :: TestT Identity -> IO ()
+    go v =  do
+      let TestT _ t = v
+      print t
+      runBeamMySQL conn . runInsert . insert (_testTestTable testDB) . insertValues $ [v]
+-}
+insertSample conn = runBeamMySQL conn . runInsert . insert (_testTestTable testDB) $ go
   where
     go :: SqlInsertValues MySQL (TestT (QExpr MySQL s))
     go = insertValues . toList . imap buildTestT $ sampleData
