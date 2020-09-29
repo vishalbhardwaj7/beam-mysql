@@ -3,7 +3,7 @@ module Database.Beam.MySQL.Syntax.Value where
 import           Data.ByteString (ByteString)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Scientific (Scientific)
-import           Data.Text (Text)
+import           Data.Text (Text, pack)
 import           Data.Time (Day, LocalTime, TimeOfDay)
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (HasSqlValueSyntax (sqlValueSyntax),
@@ -109,6 +109,11 @@ instance HasSqlValueSyntax MySQLValueSyntax Text where
   {-# INLINABLE sqlValueSyntax #-}
   sqlValueSyntax :: Text -> MySQLValueSyntax
   sqlValueSyntax = VText
+
+instance HasSqlValueSyntax MySQLValueSyntax String where
+  {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: String -> MySQLValueSyntax
+  sqlValueSyntax = VText . pack
 
 instance HasSqlValueSyntax MySQLValueSyntax Day where
   {-# INLINABLE sqlValueSyntax #-}
