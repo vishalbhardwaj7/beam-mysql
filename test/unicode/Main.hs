@@ -67,17 +67,6 @@ setUpDB conn = traverse_ (execute_ conn) [
       "data varchar(255) not null);"
 
 insertSample :: MySQLConn -> IO ()
-{-
-insertSample conn = do
-  let ixedData = imap (TestT . fromIntegral) sampleData
-  traverse_ go ixedData
-  where
-    go :: TestT Identity -> IO ()
-    go v =  do
-      let TestT _ t = v
-      print t
-      runBeamMySQL conn . runInsert . insert (_testTestTable testDB) . insertValues $ [v]
--}
 insertSample conn = runBeamMySQL conn . runInsert . insert (_testTestTable testDB) $ go
   where
     go :: SqlInsertValues MySQL (TestT (QExpr MySQL s))
