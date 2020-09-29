@@ -20,6 +20,8 @@ data MySQLValueSyntax =
   VWord32 {-# UNPACK #-} !Word32 |
   VWord64 {-# UNPACK #-} !Word64 |
   VScientific {-# UNPACK #-} !Scientific |
+  VFloat {-# UNPACK #-} !Float |
+  VDouble {-# UNPACK #-} !Double |
   VNothing | -- Missing value
   VNull | -- SQL NULL
   VByteString {-# UNPACK #-} !ByteString |
@@ -88,6 +90,16 @@ instance HasSqlValueSyntax MySQLValueSyntax Scientific where
   {-# INLINABLE sqlValueSyntax #-}
   sqlValueSyntax :: Scientific -> MySQLValueSyntax
   sqlValueSyntax = VScientific
+
+instance HasSqlValueSyntax MySQLValueSyntax Float where
+  {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Float -> MySQLValueSyntax
+  sqlValueSyntax = VFloat
+
+instance HasSqlValueSyntax MySQLValueSyntax Double where
+  {-# INLINABLE sqlValueSyntax #-}
+  sqlValueSyntax :: Double -> MySQLValueSyntax
+  sqlValueSyntax = VDouble
 
 instance (HasSqlValueSyntax MySQLValueSyntax a) =>
   HasSqlValueSyntax MySQLValueSyntax (Maybe a) where

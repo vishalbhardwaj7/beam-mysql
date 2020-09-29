@@ -47,10 +47,11 @@ import           Database.Beam.MySQL.Syntax.Value (MySQLValueSyntax (..))
 import           Database.MySQL.Base (Query (Query))
 import           Database.MySQL.Protocol.Escape (escapeBytes, escapeText)
 import           Mason.Builder (BuilderFor, LazyByteStringBackend, byteString,
-                                int16Dec, int32Dec, int64Dec, int8Dec,
-                                integerDec, intersperse, lazyByteString,
-                                textUtf8, toLazyByteString, word16Dec,
-                                word32Dec, word64Dec, word8Dec, wordDec)
+                                doubleDec, floatDec, int16Dec, int32Dec,
+                                int64Dec, int8Dec, integerDec, intersperse,
+                                lazyByteString, textUtf8, toLazyByteString,
+                                word16Dec, word32Dec, word64Dec, word8Dec,
+                                wordDec)
 import           Prelude hiding (length)
 
 newtype RenderErrorType = UnsupportedOperation Text
@@ -455,6 +456,8 @@ renderValue = \case
     lazyByteString .
     Bin.toLazyByteString .
     formatScientificBuilder Fixed Nothing $ s
+  VFloat f -> pure . floatDec $ f
+  VDouble d -> pure . doubleDec $ d
   VNothing -> pure "NULL"
   VNull -> pure "NULL"
   VByteString b -> pure . quoteWrap . byteString . escapeBytes $ b
