@@ -20,7 +20,7 @@ import           Database.Beam.MySQL (runInsertRowReturning)
 import           Database.Beam.Query (SqlSelect, select)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
-import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
+import           Database.MySQL.Temp (toConnectInfo, withTempDB)
 import           GHC.Generics (Generic)
 import           Test.Hspec (Spec, describe, hspec, it, shouldReturn)
 
