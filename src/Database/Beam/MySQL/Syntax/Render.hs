@@ -461,32 +461,10 @@ renderValue = \case
   VNothing -> pure "NULL"
   VNull -> pure "NULL"
   VByteString b -> pure . quoteWrap . byteString . escapeBytes $ b
-  VText t -> do
-    -- This ensures that all text we receive can be represented.
-    -- Gory, but unavoidable.
-    let t' = decodeLatin1 . encodeUtf8 . escapeText $ t
-    pure . quoteWrap . textUtf8 $ t'
-  VDay d ->
-    pure .
-      quoteWrap .
-      textUtf8 .
-      escapeText .
-      pack .
-      formatTime defaultTimeLocale "%F" $ d
-  VLocalTime lt ->
-    pure.
-      quoteWrap .
-      textUtf8 .
-      escapeText .
-      pack .
-      formatTime defaultTimeLocale "%F %T%Q" $ lt
-  VTimeOfDay tod ->
-    pure .
-      quoteWrap .
-      textUtf8 .
-      escapeText .
-      pack .
-      formatTime defaultTimeLocale "%T%Q" $ tod
+  VText t -> escape . decodeLatin1 . encodeUtf8 $ t
+  VDay d -> escape . pack . formatTime defaultTimeLocale "%F" $ d
+  VLocalTime lt -> escape . pack . formatTime defaultTimeLocale "%F %T%Q" $ lt
+  VTimeOfDay tod -> escape . pack . formatTime defaultTimeLocale "%T%Q" $ tod
 
 renderGrouping :: MySQLGroupingSyntax -> RenderM Builder
 renderGrouping (GroupByExpressions es) =
@@ -561,6 +539,9 @@ bracketWrap = wrap "(" ")"
 
 quoteWrap :: (IsString s, Semigroup s) => s -> s
 quoteWrap = wrap "'" "'"
+
+escape :: Text -> RenderM Builder
+escape = pure . quoteWrap . textUtf8 . escapeText
 
 backtickWrap :: (IsString s, Semigroup s) => s -> s
 backtickWrap = wrap "`" "`"
