@@ -6,7 +6,6 @@ module Main (main) where
 
 import           Control.Exception.Safe (bracket)
 import           Data.Foldable (traverse_)
-import           Data.Functor.Identity (Identity)
 import           Data.Int (Int64)
 import           Data.Kind (Type)
 import           Data.Text (Text)
