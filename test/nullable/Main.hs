@@ -15,11 +15,9 @@ import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 SqlSelect, Table (PrimaryKey, primaryKey),
                                 TableEntity, all_, defaultDbSettings,
                                 runSelectReturningOne, select)
-import           Database.Beam.Backend.SQL.Row (ColumnParseError (ColumnUnexpectedNull),
-                                                brreColumn, brreError)
-import           Database.Beam.MySQL (ColumnDecodeError (ColumnDecodeError),
-                                      MySQL, errorType, runBeamMySQL,
-                                      tableNames)
+import           Database.Beam.MySQL (ColumnDecodeError (FoundUnexpectedNull),
+                                      MySQL, columnIndex, runBeamMySQL,
+                                      tablesInvolved)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
 import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
@@ -37,9 +35,7 @@ main = do
                     (\conn -> setUpBadDB conn >>
                               runQueryCatching conn)
     runQueryCatching :: MySQLConn -> IO (Maybe ColumnDecodeError)
-    runQueryCatching conn =
-      catch (runDBDumping conn)
-            (\cde@ColumnDecodeError{} -> pure . Just $ cde)
+    runQueryCatching conn = catch (runDBDumping conn) (pure . Just)
     runDBDumping :: MySQLConn -> IO (Maybe a)
     runDBDumping conn = do
       res <- runBeamMySQL conn . runSelectReturningOne $ query
@@ -55,19 +51,19 @@ spec :: Maybe ColumnDecodeError -> Spec
 spec mRes = before (go mRes) $ do
   describe "Unexpected NULLs" $ do
     it "should contain the name of the table" $ \err ->
-      (HS.member "test_table" . tableNames $ err) `shouldBe` True
+      (HS.member "test_table" . tablesInvolved $ err) `shouldBe` True
     it "should indicate the right column" $ \err ->
-      (brreColumn . errorType $ err) `shouldBe` Just 1
+      columnIndex err `shouldBe` 1
     it "should say we have an unexpected NULL" $ \err ->
-      (isUnexpectedNull . brreError . errorType $ err) `shouldBe` True
+      isUnexpectedNull err `shouldBe` True
   where
     go :: Maybe a -> IO a
     go = \case
       Nothing -> fail "Query did not throw, but should have."
       Just res -> pure res
-    isUnexpectedNull :: ColumnParseError -> Bool
+    isUnexpectedNull :: ColumnDecodeError -> Bool
     isUnexpectedNull = \case
-      ColumnUnexpectedNull -> True
+      FoundUnexpectedNull{} -> True
       _ -> False
 
 data TestT (f :: Type -> Type) = TestT
