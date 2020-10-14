@@ -5,7 +5,8 @@ module Database.Beam.MySQL
   ColumnDecodeError (..), MySQLStatementError (..),
   runBeamMySQL, runBeamMySQLDebug,
   dumpInsertSQL, dumpSelectSQL, dumpUpdateSQL, dumpDeleteSQL,
-  ViaJson(..)
+  ViaJson(..),
+  CanMungeMySQLIn, CanMungeMySQLOut
 ) where
 
 import           Data.ViaJson (ViaJson (ViaJson))

@@ -4,6 +4,8 @@
 
 * Added a wrapper `ViaJson`, plus instances, to aid unwrapping values packed
   into JSON. 
+* Added helpers for newtype deriving wrappers around existing supported types to
+  interact with `HasSqlValueSyntax MySQLValueSyntax` and `FromBackendRow MySQL`.
 
 ## 1.2.0.0
 
