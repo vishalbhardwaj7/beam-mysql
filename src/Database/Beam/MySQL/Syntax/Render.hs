@@ -5,11 +5,13 @@ module Database.Beam.MySQL.Syntax.Render where
 import           Control.Monad.Except (MonadError (throwError))
 import           Control.Monad.Writer.Strict (MonadWriter (tell), WriterT,
                                               runWriterT)
+import           Data.Aeson (encode)
 import           Data.Bifunctor (first)
 import qualified Data.Binary.Builder as Bin
 import           Data.Bool (bool)
 import           Data.ByteString.Builder.Scientific (FPFormat (Fixed),
                                                      formatScientificBuilder)
+import           Data.ByteString.Lazy (toStrict)
 import           Data.Foldable (fold)
 import           Data.HashSet (HashSet, singleton)
 import           Data.Kind (Type)
@@ -18,7 +20,6 @@ import           Data.Text (Text, pack)
 import           Data.Text.Encoding (decodeLatin1, encodeUtf8)
 import           Data.Time.Format (defaultTimeLocale, formatTime)
 import           Data.Vector (Vector, length, toList)
-import qualified Data.Vector as V
 import           Database.Beam.MySQL.Syntax.DataType (MySQLDataTypeSyntax (..),
                                                       MySQLPrecision (..))
 import           Database.Beam.MySQL.Syntax.Delete (MySQLDelete)
@@ -466,7 +467,7 @@ renderValue = \case
   VDay d -> escape . pack . formatTime defaultTimeLocale "%F" $ d
   VLocalTime lt -> escape . pack . formatTime defaultTimeLocale "%F %T%Q" $ lt
   VTimeOfDay tod -> escape . pack . formatTime defaultTimeLocale "%T%Q" $ tod
-  VViaJSONArray v -> wrap "[" "]" . intersperse "," . V.toList <$> traverse escape v
+  VViaJSON v -> escape . decodeLatin1 . toStrict . encode $ v
 
 renderGrouping :: MySQLGroupingSyntax -> RenderM Builder
 renderGrouping (GroupByExpressions es) =

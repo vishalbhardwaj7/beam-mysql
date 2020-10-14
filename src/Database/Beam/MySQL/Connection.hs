@@ -17,6 +17,7 @@ import           Control.Monad.RWS.Strict (RWS, runRWS)
 import           Control.Monad.Reader (MonadReader (ask), ReaderT (..), asks,
                                        runReaderT)
 import           Control.Monad.State.Strict (MonadState (get, put), modify)
+import           Data.Aeson (FromJSON)
 import           Data.ByteString (ByteString)
 import           Data.HashSet (HashSet)
 import           Data.Int (Int16, Int32, Int64, Int8)
@@ -29,6 +30,7 @@ import           Data.Text.Lazy.Encoding (decodeUtf8)
 import           Data.Time (Day, LocalTime, TimeOfDay)
 import           Data.Vector (Vector)
 import qualified Data.Vector as V
+import           Data.ViaJson (ViaJson)
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend (BeamBackend (..), BeamSqlBackend,
                                         BeamSqlBackendSyntax,
@@ -50,7 +52,6 @@ import           Database.Beam.MySQL.FromField (DecodeError (DecodeError),
                                                 FromFieldStrict (fromFieldStrict),
                                                 Strict (..))
 #endif
-import           Data.ViaJsonArray (ViaJsonArray)
 import           Database.Beam.MySQL.Syntax (MySQLSyntax (..))
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck)
@@ -62,7 +63,7 @@ import           Prelude hiding (map, mapM, read)
 import           System.IO.Streams (InputStream, read)
 import           System.IO.Streams.Combinators (map, mapM)
 import qualified System.IO.Streams.List as S
-import           Type.Reflection (TyCon, tyConName)
+import           Type.Reflection (TyCon, Typeable, tyConName)
 
 data MySQL = MySQL
 
@@ -207,7 +208,7 @@ instance HasSqlEqualityCheck MySQL TimeOfDay
 
 instance HasSqlQuantifiedEqualityCheck MySQL TimeOfDay
 
-instance FromBackendRow MySQL ViaJsonArray
+instance (Typeable a, FromJSON a) => FromBackendRow MySQL (ViaJson a)
 
 data MySQLStatementError =
   OperationNotSupported {
@@ -454,8 +455,6 @@ runDecode (Decode comp) v tables =
               TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
               Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
               NotValidJSON   -> JSONError tyName ft tables ix' v'
-              NotJSONArray   -> JSONError tyName ft tables ix' v'
-              NotJSONString  -> JSONError tyName ft tables ix' v'
             IEEENaN -> LenientUnexpectedNaN tyName ft tables ix'
             IEEEInfinity -> LenientUnexpectedInfinity tyName ft tables ix' v'
             IEEETooSmall -> LenientTooSmallToFit tyName ft tables ix' v'
@@ -518,8 +517,6 @@ runDecode (Decode comp) v tables =
             TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
             Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
             NotValidJSON   -> JSONError tyName ft tables ix' v'
-            NotJSONArray   -> JSONError tyName ft tables ix' v'
-            NotJSONString  -> JSONError tyName ft tables ix' v'
 
 decodeFromRow :: Int -> FromBackendRowF MySQL (Decode a) -> Decode a
 decodeFromRow needed = \case

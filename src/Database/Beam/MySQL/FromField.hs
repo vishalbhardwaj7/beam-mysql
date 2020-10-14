@@ -5,7 +5,7 @@
 
 module Database.Beam.MySQL.FromField where
 
-import           Data.Aeson (Value (Array, String), decodeStrict)
+import           Data.Aeson (FromJSON, decodeStrict)
 import           Data.Bits (Bits (zeroBits), toIntegralSized)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as Char8
@@ -15,7 +15,7 @@ import           Data.Scientific (Scientific, toBoundedInteger)
 import           Data.Text (Text, pack, unpack)
 import           Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Time (Day, LocalTime (LocalTime), TimeOfDay, midnight)
-import           Data.ViaJsonArray (ViaJsonArray (ViaJsonArray))
+import           Data.ViaJson (ViaJson (ViaJson))
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (SqlNull (SqlNull))
 import           Database.MySQL.Base (MySQLValue (..))
@@ -26,9 +26,7 @@ data Strict =
   UnexpectedNull |
   TypeMismatch |
   Won'tFit |
-  NotValidJSON |
-  NotJSONArray |
-  NotJSONString
+  NotValidJSON
   deriving stock (Eq, Show)
 
 data Lenient =
@@ -213,21 +211,13 @@ instance FromFieldStrict TimeOfDay where
         Left . DecodeError TypeMismatch . typeRepTyCon $ (typeRep @TimeOfDay)
     v -> handleNullOrMismatch v
 
-instance FromFieldStrict ViaJsonArray where
-  {-# INLINABLE fromFieldStrict #-}
+instance (Typeable a, FromJSON a) => FromFieldStrict (ViaJson a) where
+  {-# INLINEABLE fromFieldStrict #-}
   fromFieldStrict = \case
     MySQLText v -> case decodeStrict . encodeUtf8 $ v of
-      Nothing          ->
-        Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @ViaJsonArray)
-      Just (Array arr) -> ViaJsonArray <$> traverse go arr
-      _                ->
-        Left . DecodeError NotJSONArray . typeRepTyCon $ (typeRep @ViaJsonArray)
+      Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
+      Just x  -> Right . ViaJson $ x
     v           -> handleNullOrMismatch v
-    where
-      go :: Value -> Either (DecodeError Strict) Text
-      go = \case
-        String s -> Right s
-        _ -> Left . DecodeError NotJSONString . typeRepTyCon $ (typeRep @ViaJsonArray)
 
 class (FromFieldStrict a) => FromFieldLenient (a :: Type) where
   {-# INLINABLE fromFieldLenient #-}
@@ -410,7 +400,18 @@ instance FromFieldLenient TimeOfDay
 
 instance FromFieldLenient LocalTime
 
-instance FromFieldLenient ViaJsonArray
+instance (Typeable a, FromJSON a) => FromFieldLenient (ViaJson a) where
+  {-# INLINABLE fromFieldLenient #-}
+  fromFieldLenient v = case fromFieldStrict v of
+    Left (DecodeError err t) -> case err of
+      TypeMismatch -> case v of
+        MySQLBytes v' -> case decodeStrict v' of
+          Nothing ->
+            Left . DecodeError (SomeStrict NotValidJSON) . typeRepTyCon $ (typeRep @a)
+          Just x  -> Right . ViaJson $ x
+        _             -> Left . DecodeError (SomeStrict err) $ t
+      _ -> Left . DecodeError (SomeStrict err) $ t
+    Right res -> Right res
 
 -- Helpers
 

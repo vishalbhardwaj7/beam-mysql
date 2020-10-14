@@ -1,12 +1,12 @@
 module Database.Beam.MySQL.Syntax.Value where
 
+import           Data.Aeson (ToJSON (toJSON), Value)
 import           Data.ByteString (ByteString)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Scientific (Scientific)
 import           Data.Text (Text, pack)
 import           Data.Time (Day, LocalTime, TimeOfDay)
-import           Data.Vector (Vector)
-import           Data.ViaJsonArray (ViaJsonArray (ViaJsonArray))
+import           Data.ViaJson (ViaJson (ViaJson))
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (HasSqlValueSyntax (sqlValueSyntax),
                                             SqlNull)
@@ -32,7 +32,7 @@ data MySQLValueSyntax =
   VLocalTime {-# UNPACK #-} !LocalTime |
   VTimeOfDay {-# UNPACK #-} !TimeOfDay |
   -- Helper for munging via JSON
-  VViaJSONArray {-# UNPACK #-} !(Vector Text)
+  VViaJSON {-# UNPACK #-} !Value
   deriving stock (Eq, Show)
 
 instance HasSqlValueSyntax MySQLValueSyntax Bool where
@@ -146,7 +146,7 @@ instance HasSqlValueSyntax MySQLValueSyntax LocalTime where
   sqlValueSyntax :: LocalTime -> MySQLValueSyntax
   sqlValueSyntax = VLocalTime
 
-instance HasSqlValueSyntax MySQLValueSyntax ViaJsonArray where
+instance (ToJSON a) => HasSqlValueSyntax MySQLValueSyntax (ViaJson a) where
   {-# INLINABLE sqlValueSyntax #-}
-  sqlValueSyntax :: ViaJsonArray -> MySQLValueSyntax
-  sqlValueSyntax (ViaJsonArray v) = VViaJSONArray v
+  sqlValueSyntax :: ViaJson a -> MySQLValueSyntax
+  sqlValueSyntax (ViaJson v) = VViaJSON . toJSON $ v
