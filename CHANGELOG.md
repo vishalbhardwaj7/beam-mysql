@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1.0
+
+* Added a wrapper `ViaJsonArray`, plus instances, to aid unwrapping lists packed
+  into JSON arrays
+
 ## 1.2.0.0
 
 * Removed `Aeson.Value`, `NominalDiffTime`, `Rational` instances of `FromField`

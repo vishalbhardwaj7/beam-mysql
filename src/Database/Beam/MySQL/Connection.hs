@@ -13,9 +13,9 @@ import           Control.Monad.Except (ExceptT, MonadError, catchError,
                                        runExceptT, throwError)
 import           Control.Monad.Free.Church (F, iterM)
 import           Control.Monad.IO.Class (MonadIO (..))
+import           Control.Monad.RWS.Strict (RWS, runRWS)
 import           Control.Monad.Reader (MonadReader (ask), ReaderT (..), asks,
                                        runReaderT)
-import           Control.Monad.RWS.Strict (RWS, runRWS)
 import           Control.Monad.State.Strict (MonadState (get, put), modify)
 import           Data.ByteString (ByteString)
 import           Data.HashSet (HashSet)
@@ -42,12 +42,15 @@ import           Database.Beam.MySQL.Syntax.Render (RenderError (..),
                                                     renderSelect, renderUpdate)
 import           Database.Beam.MySQL.Utils (toSQLTypeName)
 #ifdef LENIENT
-import           Database.Beam.MySQL.FromField (DecodeError (DecodeError), FromFieldLenient (fromFieldLenient),
+import           Database.Beam.MySQL.FromField (DecodeError (DecodeError),
+                                                FromFieldLenient (fromFieldLenient),
                                                 Lenient (..), Strict (..))
 #else
-import           Database.Beam.MySQL.FromField (DecodeError (DecodeError), FromFieldStrict (fromFieldStrict),
+import           Database.Beam.MySQL.FromField (DecodeError (DecodeError),
+                                                FromFieldStrict (fromFieldStrict),
                                                 Strict (..))
 #endif
+import           Data.ViaJsonArray (ViaJsonArray)
 import           Database.Beam.MySQL.Syntax (MySQLSyntax (..))
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck)
@@ -204,6 +207,8 @@ instance HasSqlEqualityCheck MySQL TimeOfDay
 
 instance HasSqlQuantifiedEqualityCheck MySQL TimeOfDay
 
+instance FromBackendRow MySQL ViaJsonArray
+
 data MySQLStatementError =
   OperationNotSupported {
     operationName :: {-# UNPACK #-} !Text,
@@ -276,6 +281,13 @@ data ColumnDecodeError =
   DemandedTooManyFields {
     fieldsAvailable :: {-# UNPACK #-} !Word,
     fieldsDemanded  :: {-# UNPACK #-} !Word
+    } |
+  JSONError {
+    demandedType   :: {-# UNPACK #-} !Text,
+    sqlType        :: {-# UNPACK #-} !Text,
+    tablesInvolved :: !(HashSet Text),
+    columnIndex    :: {-# UNPACK #-} !Word,
+    value          :: {-# UNPACK #-} !Text
     }
   deriving stock (Eq, Show)
 
@@ -339,10 +351,10 @@ runBeamMySQLDebug dbg conn (MySQLM comp) =
 
 renderMySQL :: MySQLSyntax -> Either RenderError (Query, HashSet Text)
 renderMySQL = \case
-  ASelect sql -> renderSelect sql
+  ASelect sql  -> renderSelect sql
   AnInsert sql -> renderInsert sql
   AnUpdate sql -> renderUpdate sql
-  ADelete sql -> renderDelete sql
+  ADelete sql  -> renderDelete sql
 
 -- Removes some duplication from MonadBeam instance
 
@@ -439,8 +451,11 @@ runDecode (Decode comp) v tables =
           case err of
             SomeStrict err' -> case err' of
               UnexpectedNull -> FoundUnexpectedNull tyName ft tables ix'
-              TypeMismatch -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
-              Won'tFit -> ValueWon'tFitIntoType tyName ft tables ix' v'
+              TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
+              Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
+              NotValidJSON   -> JSONError tyName ft tables ix' v'
+              NotJSONArray   -> JSONError tyName ft tables ix' v'
+              NotJSONString  -> JSONError tyName ft tables ix' v'
             IEEENaN -> LenientUnexpectedNaN tyName ft tables ix'
             IEEEInfinity -> LenientUnexpectedInfinity tyName ft tables ix' v'
             IEEETooSmall -> LenientTooSmallToFit tyName ft tables ix' v'
@@ -502,6 +517,9 @@ runDecode (Decode comp) v tables =
             UnexpectedNull -> FoundUnexpectedNull tyName ft tables ix'
             TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
             Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
+            NotValidJSON   -> JSONError tyName ft tables ix' v'
+            NotJSONArray   -> JSONError tyName ft tables ix' v'
+            NotJSONString  -> JSONError tyName ft tables ix' v'
 
 decodeFromRow :: Int -> FromBackendRowF MySQL (Decode a) -> Decode a
 decodeFromRow needed = \case
