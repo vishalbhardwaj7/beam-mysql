@@ -9,12 +9,14 @@ import           Data.Aeson (FromJSON, decodeStrict)
 import           Data.Bits (Bits (zeroBits), toIntegralSized)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as Char8
+import           Data.FakeUTC (FakeUTC (FakeUTC))
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
 import           Data.Scientific (Scientific, toBoundedInteger)
 import           Data.Text (Text, pack, unpack)
 import           Data.Text.Encoding (decodeUtf8, encodeUtf8)
-import           Data.Time (Day, LocalTime (LocalTime), TimeOfDay, midnight)
+import           Data.Time (Day, LocalTime (LocalTime), TimeOfDay,
+                            localTimeToUTC, midnight, utc)
 import           Data.ViaJson (ViaJson (ViaJson))
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (SqlNull (SqlNull))
@@ -212,12 +214,16 @@ instance FromFieldStrict TimeOfDay where
     v -> handleNullOrMismatch v
 
 instance (Typeable a, FromJSON a) => FromFieldStrict (ViaJson a) where
-  {-# INLINEABLE fromFieldStrict #-}
+  {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
     MySQLText v -> case decodeStrict . encodeUtf8 $ v of
       Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
       Just x  -> Right . ViaJson $ x
     v           -> handleNullOrMismatch v
+
+instance FromFieldStrict FakeUTC where
+  {-# INLINABLE fromFieldStrict #-}
+  fromFieldStrict = fmap (FakeUTC . localTimeToUTC utc) . fromFieldStrict
 
 class (FromFieldStrict a) => FromFieldLenient (a :: Type) where
   {-# INLINABLE fromFieldLenient #-}
@@ -412,6 +418,8 @@ instance (Typeable a, FromJSON a) => FromFieldLenient (ViaJson a) where
         _             -> Left . DecodeError (SomeStrict err) $ t
       _ -> Left . DecodeError (SomeStrict err) $ t
     Right res -> Right res
+
+instance FromFieldLenient FakeUTC
 
 -- Helpers
 

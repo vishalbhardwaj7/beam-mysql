@@ -95,6 +95,7 @@ library
   import:          common-lang
   exposed-modules: Database.Beam.MySQL
   other-modules:
+    Data.FakeUTC
     Data.ViaJson
     Database.Beam.MySQL.Connection
     Database.Beam.MySQL.Extra

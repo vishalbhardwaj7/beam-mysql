@@ -19,6 +19,7 @@ import           Control.Monad.Reader (MonadReader (ask), ReaderT (..), asks,
 import           Control.Monad.State.Strict (MonadState (get, put), modify)
 import           Data.Aeson (FromJSON)
 import           Data.ByteString (ByteString)
+import           Data.FakeUTC (FakeUTC)
 import           Data.HashSet (HashSet)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
@@ -209,6 +210,8 @@ instance HasSqlEqualityCheck MySQL TimeOfDay
 instance HasSqlQuantifiedEqualityCheck MySQL TimeOfDay
 
 instance (Typeable a, FromJSON a) => FromBackendRow MySQL (ViaJson a)
+
+instance FromBackendRow MySQL FakeUTC
 
 data MySQLStatementError =
   OperationNotSupported {
