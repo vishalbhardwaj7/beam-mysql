@@ -32,7 +32,7 @@ data MySQLValueSyntax =
   VLocalTime {-# UNPACK #-} !LocalTime |
   VTimeOfDay {-# UNPACK #-} !TimeOfDay |
   -- Helper for munging via JSON
-  VViaJSON {-# UNPACK #-} !Value
+  VViaJSON !Value
   deriving stock (Eq, Show)
 
 instance HasSqlValueSyntax MySQLValueSyntax Bool where
