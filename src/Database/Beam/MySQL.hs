@@ -6,10 +6,12 @@ module Database.Beam.MySQL
   runBeamMySQL, runBeamMySQLDebug,
   dumpInsertSQL, dumpSelectSQL, dumpUpdateSQL, dumpDeleteSQL,
   ViaJson(..), FakeUTC(..),
-  CanMungeMySQLIn, CanMungeMySQLOut
+  CanMungeMySQLIn, CanMungeMySQLOut,
+  MySQLValueSyntax
 ) where
 
 import           Data.FakeUTC (FakeUTC (FakeUTC))
 import           Data.ViaJson (ViaJson (ViaJson))
 import           Database.Beam.MySQL.Connection
 import           Database.Beam.MySQL.Extra
+import           Database.Beam.MySQL.Syntax.Value
