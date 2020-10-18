@@ -33,6 +33,7 @@ common common-lang
 
   build-depends:
     , base                     >=4.13    && <5
+    , generics-sop
     , mysql-haskell            ^>=0.8.4.2
     , record-dot-preprocessor  ^>=0.2.7
     , record-hasfield          ^>=1.0
