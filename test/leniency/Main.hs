@@ -4,21 +4,24 @@
 module Main (main) where
 
 import           Control.Exception.Safe (bracket)
+import           Data.AEq ((~==))
 import           Data.Foldable (traverse_)
 import           Data.Functor.Identity (Identity)
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
 import           Data.Text (Text)
+import           Data.Vector (Vector)
+import qualified Data.Vector as V
 import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 Table (PrimaryKey, primaryKey), TableEntity,
                                 defaultDbSettings, runSelectReturningOne)
-import           Database.Beam.MySQL (MySQL, runBeamMySQL)
+import           Database.Beam.MySQL (MySQL, ViaJson (ViaJson), runBeamMySQL)
 import           Database.Beam.Query (SqlSelect, all_, select)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
 import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
 import           GHC.Generics (Generic)
-import           Test.Hspec (Spec, describe, hspec, it, shouldBe)
+import           Test.Hspec (Spec, describe, hspec, it, shouldBe, shouldSatisfy)
 
 main :: IO ()
 main = do
@@ -64,7 +67,8 @@ setUpDB conn = traverse_ (execute_ conn) [
       "int8_double double not null, " <>
       "int16_double double not null, " <>
       "int32_double double not null, " <>
-      "int64_double double not null" <>
+      "int64_double double not null, " <>
+      "viajson_binary varbinary(255) not null" <>
       ");"
     insertCorrect :: Query
     insertCorrect = Query $
@@ -73,12 +77,14 @@ setUpDB conn = traverse_ (execute_ conn) [
       "float_varchar, double_varchar, " <>
       "text_tinyint, text_smallint, text_int, text_bigint, " <>
       "text_float, int8_float, int16_float, int32_float, int64_float, " <>
-      "text_double, int8_double, int16_double, int32_double, int64_double) " <>
+      "text_double, int8_double, int16_double, int32_double, int64_double, " <>
+      "viajson_binary)" <>
       "values (" <>
       "DEFAULT, '10', '256', '65666', '5000000000', '10.05', '10.0500505005', " <>
       "10, 256, 65666, 5000000000, " <>
       "10.05, 10.05, 10.05, 10.05, 10.05, " <>
-      "10.0500505005, 10.0500505005, 10.0500505005, 10.0500505005, 10.0500505005);"
+      "10.0500505005, 10.0500505005, 10.0500505005, 10.0500505005, 10.0500505005, " <>
+      "'[1,2,3,4]');"
 
 runCorrectQuery :: MySQLConn -> IO (CorrectT Identity)
 runCorrectQuery conn = do
@@ -102,9 +108,9 @@ spec res = do
     it "should parse Int64 from VARCHAR" $
       _correctInt64Varchar res `shouldBe` 5000000000
     it "should parse Float from VARCHAR" $
-      _correctFloatVarchar res `shouldBe` 10.05 -- TODO: Proper float equality. - Koz
+      _correctFloatVarchar res `shouldSatisfy` (~== 10.05)
     it "should parse Double from VARCHAR" $
-      _correctDoubleVarchar res `shouldBe` 10.0500505005
+      _correctDoubleVarchar res `shouldSatisfy` (~== 10.0500505005)
     it "should parse Text from TINYINT" $
       _correctTextTinyint res `shouldBe` "10"
     it "should parse Text from SMALLINT" $
@@ -133,6 +139,8 @@ spec res = do
       _correctInt32Double res `shouldBe` 10
     it "should parse Int64 from DOUBLE" $
       _correctInt64Double res `shouldBe` 10
+    it "should parse ViaJSON from BINARY" $
+      _correctViajsonBinary res `shouldBe` ViaJson (V.fromList [1,2,3,4])
 
 data CorrectT (f :: Type -> Type) = CorrectT
   {
@@ -156,7 +164,8 @@ data CorrectT (f :: Type -> Type) = CorrectT
     _correctInt8Double    :: Columnar f Int8,
     _correctInt16Double   :: Columnar f Int16,
     _correctInt32Double   :: Columnar f Int32,
-    _correctInt64Double   :: Columnar f Int64
+    _correctInt64Double   :: Columnar f Int64,
+    _correctViajsonBinary :: Columnar f (ViaJson (Vector Int))
   }
   deriving stock (Generic)
   deriving anyclass (Beamable)

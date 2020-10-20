@@ -216,7 +216,7 @@ instance FromFieldStrict TimeOfDay where
 instance (Typeable a, FromJSON a) => FromFieldStrict (ViaJson a) where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v -> case decodeStrict . encodeUtf8 $ v of
+    MySQLText v -> case decodeStrict . encodeUtf8 . decodeUtf8 . encodeLatin1 $ v of
       Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
       Just x  -> Right . ViaJson $ x
     v           -> handleNullOrMismatch v

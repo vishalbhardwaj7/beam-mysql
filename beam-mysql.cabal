@@ -178,6 +178,17 @@ test-suite nullable
 
   hs-source-dirs: test/nullable
 
+test-suite via-json
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , aeson
+    , QuickCheck            ^>=2.13.2
+    , quickcheck-instances  ^>=0.3.22
+
+  hs-source-dirs: test/via-json
+
 test-suite text-escaping
   import:         common-test
   type:           exitcode-stdio-1.0
@@ -216,6 +227,10 @@ test-suite leniency
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
+  build-depends:
+    , ieee754  ^>=0.8.0
+    , vector
+
   hs-source-dirs: test/leniency
 
   if !flag(lenient)
