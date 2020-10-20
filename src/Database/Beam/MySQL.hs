@@ -6,7 +6,6 @@ module Database.Beam.MySQL
   runBeamMySQL, runBeamMySQLDebug,
   dumpInsertSQL, dumpSelectSQL, dumpUpdateSQL, dumpDeleteSQL,
   ViaJson(..), FakeUTC(..),
-  CanMungeMySQLIn, CanMungeMySQLOut,
   MySQLValueSyntax
 ) where
 

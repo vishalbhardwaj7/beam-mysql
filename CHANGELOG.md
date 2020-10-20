@@ -6,9 +6,7 @@
   into JSON. 
 * Added a wrapper `FakeUTC`, plus instances, to assist with use of `UTCTime` in
   cases where you know that the database is zoned to UTC.
-* Added helpers for newtype deriving wrappers around existing supported types to
-  interact with `HasSqlValueSyntax MySQLValueSyntax` and `FromBackendRow MySQL`.
-* Fix improper spacing on postfix SQL functions.
+* Fix some rendering issues.
 
 ## 1.2.0.0
 

@@ -227,7 +227,7 @@ renderExpr es = case es of
     pure $
       "CASE " <>
       (intersperse " " . toList $ cases') <>
-      "ELSE " <>
+      " ELSE " <>
       def <>
       " END"
   Field nam -> renderFieldName nam

@@ -17,7 +17,6 @@ import           Data.Text.Lazy (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Vector (Vector, find, foldl1', head, length, mapMaybe,
                               unfoldrM, zip, (!?))
-import           Database.Beam.Backend (HasSqlValueSyntax)
 import           Database.Beam.Backend.SQL.Row (FromBackendRow)
 import           Database.Beam.MySQL.Connection (MySQL, MySQLM (MySQLM),
                                                  MySQLMEnv (..),
@@ -41,7 +40,6 @@ import           Database.Beam.MySQL.Syntax.Select (BinOp (LAnd), CompOp (CEq),
                                                     Projection (..),
                                                     TableHeader (Anonymous),
                                                     TableRowExpression (..))
-import           Database.Beam.MySQL.Syntax.Value (MySQLValueSyntax)
 import           Database.Beam.Query (SqlDelete (..), SqlInsert (..),
                                       SqlSelect (..), SqlUpdate (..),
                                       runSelectReturningOne)
@@ -50,11 +48,6 @@ import           Database.MySQL.Base (FieldType, MySQLConn,
                                       execute_, okAffectedRows)
 import           Prelude hiding (head, length, read, zip)
 import           System.IO.Streams (InputStream, read)
-
--- Helpers for deriving via
-type CanMungeMySQLIn (a :: Type) = HasSqlValueSyntax MySQLValueSyntax a
-
-type CanMungeMySQLOut (a :: Type) = FromBackendRow MySQL a
 
 dumpInsertSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlInsert MySQL table -> Maybe Text
