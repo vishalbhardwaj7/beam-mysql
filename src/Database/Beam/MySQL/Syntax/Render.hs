@@ -383,14 +383,14 @@ renderNumPrec = \case
 
 renderPostOp :: PostOp -> RenderM Builder
 renderPostOp = pure . \case
-  GIsNull       -> "IS NULL"
-  GIsNotNull    -> "IS NOT NULL"
-  GIsTrue       -> "IS TRUE"
-  GIsNotTrue    -> "IS NOT TRUE"
-  GIsFalse      -> "IS FALSE"
-  GIsNotFalse   -> "IS NOT FALSE"
-  GIsUnknown    -> "IS UNKNOWN"
-  GIsNotUnknown -> "IS NOT UNKNOWN"
+  GIsNull       -> " IS NULL"
+  GIsNotNull    -> " IS NOT NULL"
+  GIsTrue       -> " IS TRUE"
+  GIsNotTrue    -> " IS NOT TRUE"
+  GIsFalse      -> " IS FALSE"
+  GIsNotFalse   -> " IS NOT FALSE"
+  GIsUnknown    -> " IS UNKNOWN"
+  GIsNotUnknown -> " IS NOT UNKNOWN"
 
 renderPrefOp :: PrefOp -> RenderM Builder
 renderPrefOp = pure . \case
