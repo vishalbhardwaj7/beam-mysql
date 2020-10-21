@@ -211,7 +211,15 @@ instance HasSqlQuantifiedEqualityCheck MySQL TimeOfDay
 
 instance (Typeable a, FromJSON a) => FromBackendRow MySQL (ViaJson a)
 
+instance (Typeable a, FromJSON a) => HasSqlEqualityCheck MySQL (ViaJson a)
+
+instance (Typeable a, FromJSON a) => HasSqlQuantifiedEqualityCheck MySQL (ViaJson a)
+
 instance FromBackendRow MySQL FakeUTC
+
+instance HasSqlEqualityCheck MySQL FakeUTC
+
+instance HasSqlQuantifiedEqualityCheck MySQL FakeUTC
 
 data MySQLStatementError =
   OperationNotSupported {
