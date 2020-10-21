@@ -7,6 +7,7 @@
 * Added a wrapper `FakeUTC`, plus instances, to assist with use of `UTCTime` in
   cases where you know that the database is zoned to UTC.
 * Fix some rendering issues.
+* More tests.
 
 ## 1.2.0.0
 
