@@ -7,6 +7,8 @@
 * Added a wrapper `FakeUTC`, plus instances, to assist with use of `UTCTime` in
   cases where you know that the database is zoned to UTC.
 * Fix some rendering issues.
+* Ensure that `runInsertRowReturning` throws an exception if asked to work over
+  a table without a primary key.
 * More tests.
 
 ## 1.2.0.0
