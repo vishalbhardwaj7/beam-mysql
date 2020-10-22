@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1602681306,
+        "lastModified": 1603287523,
         "narHash": "sha256-sGbiWEQ9mQseYnRb6hQbDwqH14Xy4sXbvyYHlgZxc3I=",
         "owner": "juspay",
         "repo": "beam",
-        "rev": "cb9edb37ec7d629e1ad1b31eaa661762a0df3732",
+        "rev": "b369dfb2077bc31221130379cc0e705c66f5bdcf",
         "type": "github"
       },
       "original": {
@@ -26,11 +26,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1602680967,
-        "narHash": "sha256-1HMQMb/G6xWQ0ujxBwsycs1OZLicgZvMdXf4Kxn9rWs=",
+        "lastModified": 1602937665,
+        "narHash": "sha256-D55WYDBLTo8cLIKmuqK1Mwqp+xm0XaJd3EJQg8VNzZo=",
         "ref": "wip",
-        "rev": "b0c06dde67a97629c544d1287a21059aa248d91a",
-        "revCount": 23,
+        "rev": "a086c401bb812c73fabfc561d746fcf582a17799",
+        "revCount": 24,
         "type": "git",
         "url": "ssh://git@bitbucket.org/juspay/euler-build"
       },

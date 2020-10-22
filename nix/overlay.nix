@@ -44,6 +44,24 @@ super.eulerBuild.mkEulerHaskellOverlay self super
         drv = hself.callCabal2nix "mysql-haskell" mysql-haskell-path { };
       };
 
+      mason =
+        eulerBuild.fastBuildExternal {
+          drv = hself.callHackageDirect {
+            pkg = "mason";
+            ver = "0.2.3";
+            sha256 = "1dcd3n1lxlpjsz92lmr1nsx29mwwglim0gask04668sdiarr3x1v";
+          } { };
+        };
+
+      record-dot-preprocessor =
+        eulerBuild.fastBuildExternal {
+          drv = hself.callHackageDirect {
+            pkg = "record-dot-preprocessor";
+            ver = "0.2.7";
+            sha256 = "0dyn5wpn0p4sc1yw4zq9awrl2aa3gd3jamllfxrg31v3i3l6jvbw";
+          } { };
+        };
+
       beam-mysql = self.eulerBuild.fastBuildExternal {
         drv = hself.callCabal2nix "beam-mysql" beam-mysql-path { };
       };
