@@ -11,8 +11,8 @@ import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 Table (PrimaryKey, primaryKey), TableEntity,
                                 defaultDbSettings)
 import           Database.Beam.MySQL (MySQL, dumpSelectSQL)
-import           Database.Beam.Query (SqlSelect, all_, guard_, select, val_,
-                                      (==.))
+import           Database.Beam.Query (SqlSelect, all_, guard_, isNothing_,
+                                      select, val_, (==.))
 import           GHC.Generics (Generic)
 import           Test.Hspec (describe, hspec, it, shouldBe)
 
@@ -27,7 +27,16 @@ main = hspec $ do
       dumpSelectSQL whereSelect `shouldBe`
         Just ("SELECT `t0`.`id` AS `res0`, `t0`.`data` AS `res1` " <>
               "FROM `test_table` AS `t0` " <>
-              "WHERE (`t0`.`data`) = ('foo');")
+              "WHERE CASE WHEN ((`t0`.`data`) IS NULL) AND (('foo') IS NULL) " <>
+              "THEN TRUE " <>
+              "WHEN ((`t0`.`data`) IS NULL) OR (('foo') IS NULL) " <>
+              "THEN FALSE ELSE (`t0`.`data`) = ('foo') END;")
+  describe "Selects with operators" $ do
+    it "should generate correctly with an IS NULL" $
+      dumpSelectSQL isNullSelect `shouldBe`
+        Just ("SELECT `t0`.`id` AS `res0`, `t0`.`data` AS `res1` " <>
+              "FROM `test_table` AS `t0` " <>
+              "WHERE (`t0`.`data`) IS NULL;")
 
 -- Helpers
 
@@ -35,7 +44,7 @@ main = hspec $ do
 
 data TestT (f :: Type -> Type) = TestT
   { _testId   :: Columnar f Int64,
-    _testData :: Columnar f Text
+    _testData :: Columnar f (Maybe Text)
   }
   deriving stock (Generic)
   deriving anyclass (Beamable)
@@ -65,5 +74,11 @@ simpleSelect = select . all_ . _testTestTable $ testDB
 whereSelect :: SqlSelect MySQL (TestT Identity)
 whereSelect = select $ do
   res <- all_ . _testTestTable $ testDB
-  guard_ (_testData res ==. val_ "foo")
+  guard_ (_testData res ==. val_ (Just "foo"))
+  pure res
+
+isNullSelect :: SqlSelect MySQL (TestT Identity)
+isNullSelect = select $ do
+  res <- all_ . _testTestTable $ testDB
+  guard_ (isNothing_ . _testData $ res)
   pure res

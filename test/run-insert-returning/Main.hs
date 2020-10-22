@@ -5,7 +5,7 @@
 
 module Main (main) where
 
-import           Control.Exception.Safe (bracket)
+import           Control.Exception.Safe (bracket, catch)
 import           Data.Foldable (traverse_)
 import           Data.Functor.Identity (Identity)
 import           Data.Int (Int64)
@@ -14,8 +14,9 @@ import           Data.Text (Text)
 import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
                                 Table (PrimaryKey, primaryKey), TableEntity,
                                 defaultDbSettings)
-import           Database.Beam.MySQL (MySQL, runBeamMySQL,
-                                      runInsertRowReturning)
+import           Database.Beam.MySQL (MySQL,
+                                      MySQLStatementError (OperationNotSupported),
+                                      runBeamMySQL, runInsertRowReturning)
 import           Database.Beam.Query (QExpr, SqlInsert, default_, insert,
                                       insertExpressions, insertValues, val_)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
@@ -36,6 +37,7 @@ main =
       hspec $ do
         beforeAll (queryPkAi conn) pkAiSpec
         beforeAll (queryPkNoAi conn) pkNoAiSpec
+        beforeAll (queryNoPk conn) noPkSpec
 
 -- Helpers
 
@@ -44,7 +46,8 @@ setUpDB conn = traverse_ (execute_ conn) [
   "create database test;",
   "use test",
   makePkAi,
-  makePkNoAi
+  makePkNoAi,
+  makeNoPk
   ]
   where
     makePkAi :: Query
@@ -57,6 +60,11 @@ setUpDB conn = traverse_ (execute_ conn) [
       "create table pknoai (" <>
       "id varchar(255) primary key, " <>
       "data varchar(255) not null);"
+    makeNoPk :: Query
+    makeNoPk = Query $
+      "create table nopk (" <>
+      "id varchar(255) not null" <>
+      ");"
 
 queryPkAi :: MySQLConn -> IO (Maybe (PkAiT Identity))
 queryPkAi conn = runBeamMySQL conn . runInsertRowReturning $ go
@@ -72,6 +80,17 @@ queryPkNoAi conn = runBeamMySQL conn . runInsertRowReturning $ go
     go :: SqlInsert MySQL PkNoAiT
     go = insert (_testPknoai testDB) (insertValues [PkNoAiT "foo" "bar"])
 
+queryNoPk :: MySQLConn -> IO (Maybe MySQLStatementError)
+queryNoPk conn = catch (fmap (const Nothing) .
+                          runBeamMySQL conn .
+                          runInsertRowReturning $ go)
+                       handler
+  where
+    go :: SqlInsert MySQL NoPkT
+    go = insert (_testNopk testDB) (insertValues [NoPkT "foo"])
+    handler :: MySQLStatementError -> IO (Maybe MySQLStatementError)
+    handler = pure . Just
+
 pkAiSpec :: SpecWith (Maybe (PkAiT Identity))
 pkAiSpec = describe "Autoincrement primary key table inserts" $ do
   it "should return on success" $ \res -> do
@@ -81,6 +100,14 @@ pkNoAiSpec :: SpecWith (Maybe (PkNoAiT Identity))
 pkNoAiSpec = describe "Ordinary table inserts" $
   it "should return on success" $ \res -> do
     res `shouldBe` Just (PkNoAiT "foo" "bar")
+
+noPkSpec :: SpecWith (Maybe MySQLStatementError)
+noPkSpec = describe "Inserts into table without primary key" $
+  it "should throw" $ \case
+    Just (OperationNotSupported op c _) -> do
+      op `shouldBe` "Insert row returning without primary key"
+      c `shouldBe` "nopk"
+    _                                   -> fail "Threw wrong exception type."
 
 -- Beam boilerplate
 
@@ -122,10 +149,25 @@ instance Table PkNoAiT where
     deriving anyclass (Beamable)
   primaryKey = PkNoAiPK . _pknoaiId
 
+newtype NoPkT (f :: Type -> Type) = NoPkT
+  {
+    _nopkId :: Columnar f Text
+  }
+  deriving stock (Generic)
+  deriving anyclass (Beamable)
+
+instance Table NoPkT where
+  data PrimaryKey NoPkT (f :: Type -> Type) =
+    NoPkPK (Columnar f Text)
+    deriving stock (Generic)
+    deriving anyclass (Beamable)
+  primaryKey = NoPkPK . _nopkId
+
 data TestDB (f :: Type -> Type) = TestDB
   {
     _testPkai   :: f (TableEntity PkAiT),
-    _testPknoai :: f (TableEntity PkNoAiT)
+    _testPknoai :: f (TableEntity PkNoAiT),
+    _testNopk   :: f (TableEntity NoPkT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)

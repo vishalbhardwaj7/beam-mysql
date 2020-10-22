@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds     #-}
 {-# LANGUAGE KindSignatures      #-}
 {-# LANGUAGE MonoLocalBinds      #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -5,7 +6,7 @@
 module Database.Beam.MySQL.Extra where
 
 import           Control.Exception.Safe (bracket, throw)
-import           Control.Monad ((>=>))
+import           Control.Monad (when, (>=>))
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader (asks)
 import           Data.Foldable (traverse_)
@@ -15,7 +16,7 @@ import           Data.Text (Text, pack)
 import           Data.Text.Lazy (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Vector (Vector, find, foldl1', head, length, mapMaybe,
-                              unfoldrM, zip, (!?))
+                              null, unfoldrM, zip, (!?))
 import           Database.Beam.Backend.SQL.Row (FromBackendRow)
 import           Database.Beam.MySQL.Connection (MySQL, MySQLM (MySQLM),
                                                  MySQLMEnv (..),
@@ -45,7 +46,7 @@ import           Database.Beam.Query (SqlDelete (..), SqlInsert (..),
 import           Database.MySQL.Base (FieldType, MySQLConn,
                                       MySQLValue (MySQLText), Query (Query),
                                       execute_, okAffectedRows)
-import           Prelude hiding (head, length, read, zip)
+import           Prelude hiding (head, length, null, read, zip)
 import           System.IO.Streams (InputStream, read)
 
 dumpInsertSQL :: forall (table :: (Type -> Type) -> Type) .
@@ -115,6 +116,12 @@ multipleRowInserts rows =
 impureExpr :: MySQLExpressionSyntax -> MySQLInsert -> MySQLM a
 impureExpr e = throw . ImpureExpression (pack . show $ e) . pack . show
 
+noPrimaryKey :: MySQLInsert -> MySQLM ()
+noPrimaryKey ins =
+  throw .
+  OperationNotSupported "Insert row returning without primary key" ins.tableName.name .
+  pack . show $ ins
+
 -- Core logic
 
 insertRowReturning :: forall (table :: (Type -> Type) -> Type) .
@@ -133,6 +140,8 @@ insertRowReturning ins (TableRowExpression v) query = do
   conn <- getConnection
   -- Get the names of all primary key columns in the table.
   pkColNames <- getPkCols conn ins.tableName.name
+  -- If we don't find anything, abort.
+  when (null pkColNames) (noPrimaryKey ins)
   -- Determine if we have an auto-increment column, and if so, what it is
   mAIColumn <- getAutoIncColumn conn ins.tableName.name
   -- Run the insert
@@ -157,7 +166,7 @@ data Purity = Pure | Impure
 
 instance Semigroup Purity where
   Impure <> _ = Impure
-  Pure <> x = x
+  Pure <> x   = x
 
 instance Monoid Purity where
   mempty = Pure

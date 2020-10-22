@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          beam-mysql
-version:       1.2.0.0
+version:       1.2.1.0
 synopsis:      Connection layer between beam and MySQL/MariaDB
 description:
   Beam driver for MySQL or MariaDB databases, two popular open-source databases.
@@ -17,7 +17,7 @@ copyright:
 
 category:      Database
 build-type:    Simple
-tested-with:   GHC ==8.8.1
+tested-with:   GHC ==8.8.3
 
 source-repository head
   type:     git
@@ -32,12 +32,15 @@ common common-lang
     -fplugin=RecordDotPreprocessor
 
   build-depends:
-    , base                     >=4.13    && <5
+    , base                     >=4.13     && <5
+    , beam-core                ^>=0.9.0.0
+    , generics-sop             ^>=0.5.1.0
     , mysql-haskell            ^>=0.8.4.2
     , record-dot-preprocessor  ^>=0.2.7
     , record-hasfield          ^>=1.0
     , safe-exceptions          ^>=0.1.7.0
     , text                     ^>=1.2.4.0
+    , unordered-containers     ^>=0.2.10.0
 
   default-extensions:
     DataKinds
@@ -65,7 +68,6 @@ common common-bench
   import:        common-lang
   ghc-options:   -O2 -threaded -with-rtsopts=-N
   build-depends:
-    , beam-core
     , beam-mysql
     , criterion   ^>=1.5.6.2
     , fmt
@@ -75,11 +77,9 @@ common common-test
   import:         common-lang
   ghc-options:    -O2 -threaded -with-rtsopts=-N
   build-depends:
-    , beam-core
     , beam-mysql
-    , hspec                 ^>=2.7.1
+    , hspec       ^>=2.7.1
     , mysql-temp
-    , unordered-containers
 
   hs-source-dirs: test
 
@@ -95,6 +95,8 @@ library
   import:          common-lang
   exposed-modules: Database.Beam.MySQL
   other-modules:
+    Data.FakeUTC
+    Data.ViaJson
     Database.Beam.MySQL.Connection
     Database.Beam.MySQL.Extra
     Database.Beam.MySQL.FromField
@@ -110,23 +112,22 @@ library
     Database.Beam.MySQL.Utils
 
   build-depends:
-    , aeson                 ^>=1.4.7.1
-    , beam-core             ^>=0.9.0.0
-    , binary                ^>=0.8.7.0
-    , bytestring            ^>=0.10.10.0
-    , fmt                   ^>=0.6.1.2
-    , free                  ^>=5.1.3
-    , int-cast              ^>=0.2.0.0
-    , io-streams            ^>=1.5.1.0
-    , mason                 ^>=0.2.3
-    , mtl                   ^>=2.2.2
-    , mysql-haskell         ^>=0.8.4.2
-    , safe-exceptions       ^>=0.1.7.0
-    , scientific            ^>=0.3.6.2
-    , text                  ^>=1.2.4.0
-    , time                  ^>=1.9.3
-    , unordered-containers  ^>=0.2.10.0
-    , vector                ^>=0.12.1.2
+    , aeson            ^>=1.4.7.1
+    , binary           ^>=0.8.7.0
+    , bytestring       ^>=0.10.10.0
+    , fmt              ^>=0.6.1.2
+    , free             ^>=5.1.3
+    , hashable         ^>=1.3.0.0
+    , int-cast         ^>=0.2.0.0
+    , io-streams       ^>=1.5.1.0
+    , mason            ^>=0.2.3
+    , mtl              ^>=2.2.2
+    , mysql-haskell    ^>=0.8.4.2
+    , safe-exceptions  ^>=0.1.7.0
+    , scientific       ^>=0.3.6.2
+    , text             ^>=1.2.4.0
+    , time             ^>=1.9.3
+    , vector           ^>=0.12.1.2
 
   if flag(lenient)
     cpp-options: -DLENIENT
@@ -177,10 +178,22 @@ test-suite nullable
 
   hs-source-dirs: test/nullable
 
+test-suite via-json
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , aeson
+    , QuickCheck            ^>=2.13.2
+    , quickcheck-instances  ^>=0.3.22
+
+  hs-source-dirs: test/via-json
+
 test-suite text-escaping
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
+  build-depends:  aeson
   hs-source-dirs: test/text-escaping
 
 test-suite bobby-tables
@@ -215,6 +228,10 @@ test-suite leniency
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
+  build-depends:
+    , ieee754  ^>=0.8.0
+    , vector
+
   hs-source-dirs: test/leniency
 
   if !flag(lenient)
