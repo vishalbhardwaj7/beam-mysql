@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          beam-mysql
-version:       1.1.0.0
+version:       1.2.0.0
 synopsis:      Connection layer between beam and MySQL/MariaDB
 description:
   Beam driver for MySQL or MariaDB databases, two popular open-source databases.
@@ -23,16 +23,28 @@ source-repository head
   type:     git
   location: https://github.com/juspay/beam-mysql 
 
+-- Common sections
+
 common common-lang
   ghc-options:
     -Wall -Wcompat -Wincomplete-record-updates
     -Wincomplete-uni-patterns -Wredundant-constraints -Werror
+    -fplugin=RecordDotPreprocessor
 
-  build-depends:      base >=4.13 && <5
+  build-depends:
+    , base                     >=4.13    && <5
+    , mysql-haskell            ^>=0.8.4.2
+    , record-dot-preprocessor  ^>=0.2.7
+    , record-hasfield          ^>=1.0
+    , safe-exceptions          ^>=0.1.7.0
+    , text                     ^>=1.2.4.0
+
   default-extensions:
+    DataKinds
     DeriveFunctor
     DeriveGeneric
     DerivingStrategies
+    DuplicateRecordFields
     EmptyCase
     FlexibleContexts
     FlexibleInstances
@@ -42,6 +54,10 @@ common common-lang
     MultiParamTypeClasses
     OverloadedStrings
     TupleSections
+    TypeApplications
+    TypeFamilies
+    TypeSynonymInstances
+    UndecidableInstances
 
   default-language:   Haskell2010
 
@@ -51,32 +67,58 @@ common common-bench
   build-depends:
     , beam-core
     , beam-mysql
-    , bytestring
-    , directory        ^>=1.3.6.0
-    , filepath         ^>=1.4.2.1
-    , hspec
-    , mysql-haskell
-    , random           ^>=1.1
-    , safe-exceptions
-    , text
-    , typed-process    ^>=0.2.6.0
-    , unix             ^>=2.7.2.2
+    , criterion   ^>=1.5.6.2
+    , fmt
+    , mysql-temp
+
+common common-test
+  import:         common-lang
+  ghc-options:    -O2 -threaded -with-rtsopts=-N
+  build-depends:
+    , beam-core
+    , beam-mysql
+    , hspec                 ^>=2.7.1
+    , mysql-temp
+    , unordered-containers
+
+  hs-source-dirs: test
+
+-- Flags
+
+flag lenient
+  description: Be lenient when decoding (see LENIENT.md for description).
+  default:     False
+
+-- Libraries
 
 library
   import:          common-lang
-  exposed-modules:
-    Database.Beam.MySQL
+  exposed-modules: Database.Beam.MySQL
+  other-modules:
     Database.Beam.MySQL.Connection
+    Database.Beam.MySQL.Extra
     Database.Beam.MySQL.FromField
     Database.Beam.MySQL.Syntax
+    Database.Beam.MySQL.Syntax.DataType
+    Database.Beam.MySQL.Syntax.Delete
+    Database.Beam.MySQL.Syntax.Insert
+    Database.Beam.MySQL.Syntax.Misc
+    Database.Beam.MySQL.Syntax.Render
+    Database.Beam.MySQL.Syntax.Select
+    Database.Beam.MySQL.Syntax.Update
+    Database.Beam.MySQL.Syntax.Value
+    Database.Beam.MySQL.Utils
 
   build-depends:
     , aeson                 ^>=1.4.7.1
     , beam-core             ^>=0.9.0.0
+    , binary                ^>=0.8.7.0
     , bytestring            ^>=0.10.10.0
     , fmt                   ^>=0.6.1.2
     , free                  ^>=5.1.3
+    , int-cast              ^>=0.2.0.0
     , io-streams            ^>=1.5.1.0
+    , mason                 ^>=0.2.3
     , mtl                   ^>=2.2.2
     , mysql-haskell         ^>=0.8.4.2
     , safe-exceptions       ^>=0.1.7.0
@@ -86,63 +128,41 @@ library
     , unordered-containers  ^>=0.2.10.0
     , vector                ^>=0.12.1.2
 
+  if flag(lenient)
+    cpp-options: -DLENIENT
+
   hs-source-dirs:  src
-
-executable raw-insert-bench
-  import:         common-bench
-  main-is:        Main.hs
-  other-modules:
-    DBConfig
-    TmpMySQL
-
-  hs-source-dirs: bench bench/raw-insert
-
-executable beam-insert-bench
-  import:         common-bench
-  main-is:        Main.hs
-  other-modules:
-    DBConfig
-    TmpMySQL
-
-  hs-source-dirs: bench bench/beam-insert
 
 library mysql-temp
   import:          common-lang
   visibility:      private
   exposed-modules: Database.MySQL.Temp
   build-depends:
-    , directory        ^>=1.3.6.0
-    , filepath         ^>=1.4.2.1
+    , directory      ^>=1.3.6.0
+    , filepath       ^>=1.4.2.1
     , fmt
-    , mysql-haskell
-    , random           ^>=1.1
-    , safe-exceptions
-    , typed-process    ^>=0.2.6.0
-    , unix             ^>=2.7.2.2
+    , random         ^>=1.1
+    , typed-process  ^>=0.2.6.0
+    , unix           ^>=2.7.2.2
 
   hs-source-dirs:  temp-db
 
-executable beam-insert-row-returning-bench
-  import:         common-bench
-  main-is:        Main.hs
-  other-modules:
-    DBConfig
-    TmpMySQL
-
-  hs-source-dirs: bench bench/beam-insert-row-returning
-
-common common-test
-  import:        common-lang
-  ghc-options:   -O2 -threaded -with-rtsopts=-N
-  build-depends:
-    , beam-core
-    , beam-mysql
-    , hspec
-    , mysql-temp
-    , unordered-containers
-
-test-suite escaping-dsl
+test-suite gen-select
   import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/gen-select
+
+test-suite gen-insert
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/gen-insert
+
+test-suite nullable
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
   build-depends:
     , bytestring
     , directory        ^>=1.3.6.0
@@ -155,26 +175,61 @@ test-suite escaping-dsl
     , typed-process    ^>=0.2.6.0
     , unix             ^>=2.7.2.2
 
-  type:           exitcode-stdio-1.0
-  main-is:        Main.hs
-  hs-source-dirs: test/escaping-dsl
+  hs-source-dirs: test/nullable
 
 test-suite text-escaping
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  build-depends:  text
   hs-source-dirs: test/text-escaping
+
+test-suite bobby-tables
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/bobby-tables
 
 test-suite unicode
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  build-depends:
-    , io-streams
-    , mysql-haskell
-    , safe-exceptions
-    , text
-    , vector
-
+  build-depends:  vector
   hs-source-dirs: test/unicode
+
+test-suite run-insert-returning
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/run-insert-returning
+
+test-suite bad-schemata
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/bad-schemata
+
+  if flag(lenient)
+    buildable: False
+
+test-suite leniency
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: test/leniency
+
+  if !flag(lenient)
+    buildable: False
+
+-- Benchmarks
+
+benchmark insert
+  import:         common-bench
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: bench/insert
+
+benchmark select
+  import:         common-bench
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  hs-source-dirs: bench/select

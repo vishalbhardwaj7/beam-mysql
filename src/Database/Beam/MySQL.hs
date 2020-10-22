@@ -1,6 +1,11 @@
 module Database.Beam.MySQL
-  ( module Database.Beam.MySQL.Connection
-  , module Database.Beam.MySQL.Syntax ) where
+(
+  MySQL, MySQLM,
+  runInsertRowReturning,
+  ColumnDecodeError (..), MySQLStatementError (..),
+  runBeamMySQL, runBeamMySQLDebug,
+  dumpInsertSQL, dumpSelectSQL, dumpUpdateSQL, dumpDeleteSQL
+) where
 
-import Database.Beam.MySQL.Connection
-import Database.Beam.MySQL.Syntax
+import           Database.Beam.MySQL.Connection
+import           Database.Beam.MySQL.Extra
