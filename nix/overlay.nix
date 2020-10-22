@@ -45,7 +45,7 @@ super.eulerBuild.mkEulerHaskellOverlay self super
       };
 
       mason =
-        eulerBuild.fastBuildExternal {
+        self.eulerBuild.fastBuildExternal {
           drv = hself.callHackageDirect {
             pkg = "mason";
             ver = "0.2.3";
@@ -54,7 +54,7 @@ super.eulerBuild.mkEulerHaskellOverlay self super
         };
 
       record-dot-preprocessor =
-        eulerBuild.fastBuildExternal {
+        self.eulerBuild.fastBuildExternal {
           drv = hself.callHackageDirect {
             pkg = "record-dot-preprocessor";
             ver = "0.2.7";
