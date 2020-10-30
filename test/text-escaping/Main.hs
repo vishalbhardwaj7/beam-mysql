@@ -22,7 +22,10 @@ import           Database.Beam.Query (QBaseScope, QExpr, QFieldAssignment,
                                       updateTable, val_, (==.))
 import           GHC.Generics (Generic)
 import           Test.Hspec (describe, hspec, it, shouldBe)
+import qualified Test.Hspec as Hspec
 
+-- See "mysql-haskell".Database.MySQL.Protocol.Escape
+-- and  <http://dev.mysql.com/doc/refman/5.7/en/string-literals.html>
 main :: IO ()
 main = hspec $ do
   describe "'\\' in generated SQL for text" $ do
