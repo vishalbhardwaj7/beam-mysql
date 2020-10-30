@@ -5,11 +5,13 @@ module Database.Beam.MySQL.Syntax.Render where
 import           Control.Monad.Except (MonadError (throwError))
 import           Control.Monad.Writer.Strict (MonadWriter (tell), WriterT,
                                               runWriterT)
+import           Data.Aeson (encode)
 import           Data.Bifunctor (first)
 import qualified Data.Binary.Builder as Bin
 import           Data.Bool (bool)
 import           Data.ByteString.Builder.Scientific (FPFormat (Fixed),
                                                      formatScientificBuilder)
+import           Data.ByteString.Lazy (toStrict)
 import           Data.Foldable (fold)
 import           Data.HashSet (HashSet, singleton)
 import           Data.Kind (Type)
@@ -147,7 +149,7 @@ renderSelectTable sts = case sts of
 renderSetQuantifier :: MySQLAggregationSetQuantifierSyntax -> RenderM Builder
 renderSetQuantifier = pure . \case
   SetDistinct -> "DISTINCT"
-  SetAll -> "ALL"
+  SetAll      -> "ALL"
 
 renderProjection :: MySQLProjectionSyntax -> RenderM Builder
 renderProjection (ProjectExpressions es) = do
@@ -225,7 +227,7 @@ renderExpr es = case es of
     pure $
       "CASE " <>
       (intersperse " " . toList $ cases') <>
-      "ELSE " <>
+      " ELSE " <>
       def <>
       " END"
   Field nam -> renderFieldName nam
@@ -339,68 +341,68 @@ renderExpr es = case es of
 renderAggOp :: AggOp -> RenderM Builder
 renderAggOp = pure . \case
   Count -> "COUNT"
-  Avg -> "AVG"
-  Sum -> "SUM"
-  Min -> "MIN"
-  Max -> "MAX"
+  Avg   -> "AVG"
+  Sum   -> "SUM"
+  Min   -> "MIN"
+  Max   -> "MAX"
 
 renderExtractField :: MySQLExtractFieldSyntax -> RenderM Builder
 renderExtractField = pure . \case
   SecondsField -> "SECOND"
   MinutesField -> "MINUTE"
-  HourField -> "HOUR"
-  DayField -> "DAY"
-  MonthField -> "MONTH"
-  YearField -> "YEAR"
+  HourField    -> "HOUR"
+  DayField     -> "DAY"
+  MonthField   -> "MONTH"
+  YearField    -> "YEAR"
 
 renderCastTarget :: MySQLDataTypeSyntax -> RenderM Builder
 renderCastTarget = pure . \case
-  DomainType t -> backtickWrap . textUtf8 $ t
-  CharType{} -> "CHAR"
-  VarCharType{} -> "CHAR"
-  NationalCharType{} -> "CHAR"
+  DomainType t          -> backtickWrap . textUtf8 $ t
+  CharType{}            -> "CHAR"
+  VarCharType{}         -> "CHAR"
+  NationalCharType{}    -> "CHAR"
   NationalVarCharType{} -> "CHAR"
-  BitType{} -> "BINARY"
-  VarBitType{} -> "BINARY"
-  NumericType mPrec -> "DECIMAL" <> renderNumPrec mPrec
-  DecimalType mPrec -> "DECIMAL" <> renderNumPrec mPrec
-  IntType -> "INTEGER"
-  SmallIntType -> "INTEGER"
-  FloatType prec -> "FLOAT" <> foldMap (bracketWrap . wordDec) prec
-  DoubleType -> "DECIMAL"
-  RealType -> "DECIMAL"
-  DateType -> "DATE"
-  TimeType -> "TIME"
-  TimestampType -> "DATETIME"
+  BitType{}             -> "BINARY"
+  VarBitType{}          -> "BINARY"
+  NumericType mPrec     -> "DECIMAL" <> renderNumPrec mPrec
+  DecimalType mPrec     -> "DECIMAL" <> renderNumPrec mPrec
+  IntType               -> "INTEGER"
+  SmallIntType          -> "INTEGER"
+  FloatType prec        -> "FLOAT" <> foldMap (bracketWrap . wordDec) prec
+  DoubleType            -> "DECIMAL"
+  RealType              -> "DECIMAL"
+  DateType              -> "DATE"
+  TimeType              -> "TIME"
+  TimestampType         -> "DATETIME"
 
 renderNumPrec :: MySQLPrecision -> Builder
 renderNumPrec = \case
-  None -> mempty
-  DigitsOnly d -> bracketWrap . wordDec $ d
+  None            -> mempty
+  DigitsOnly d    -> bracketWrap . wordDec $ d
   DigitsScale d s -> bracketWrap (wordDec d <> ", " <> wordDec s)
 
 renderPostOp :: PostOp -> RenderM Builder
 renderPostOp = pure . \case
-  GIsNull -> "IS NULL"
-  GIsNotNull -> "IS NOT NULL"
-  GIsTrue -> "IS TRUE"
-  GIsNotTrue -> "IS NOT TRUE"
-  GIsFalse -> "IS FALSE"
-  GIsNotFalse -> "IS NOT FALSE"
-  GIsUnknown -> "IS UNKNOWN"
-  GIsNotUnknown -> "IS NOT UNKNOWN"
+  GIsNull       -> " IS NULL"
+  GIsNotNull    -> " IS NOT NULL"
+  GIsTrue       -> " IS TRUE"
+  GIsNotTrue    -> " IS NOT TRUE"
+  GIsFalse      -> " IS FALSE"
+  GIsNotFalse   -> " IS NOT FALSE"
+  GIsUnknown    -> " IS UNKNOWN"
+  GIsNotUnknown -> " IS NOT UNKNOWN"
 
 renderPrefOp :: PrefOp -> RenderM Builder
 renderPrefOp = pure . \case
-  LNot -> "NOT"
-  NNegate -> "-"
-  TCharLength -> "CHAR_LENGTH"
+  LNot         -> "NOT"
+  NNegate      -> "-"
+  TCharLength  -> "CHAR_LENGTH"
   TOctetLength -> "OCTET_LENGTH"
-  BBitLength -> "BIT_LENGTH"
-  TLower -> "LOWER"
-  TUpper -> "UPPER"
-  TTrim -> "TRIM"
-  NAbs -> "ABS"
+  BBitLength   -> "BIT_LENGTH"
+  TLower       -> "LOWER"
+  TUpper       -> "UPPER"
+  TTrim        -> "TRIM"
+  NAbs         -> "ABS"
 
 renderCompOp :: CompOp -> RenderM Builder
 renderCompOp = pure . \case
@@ -418,14 +420,14 @@ renderQuantifier = pure . \case
 
 renderBinOp :: BinOp -> RenderM Builder
 renderBinOp = pure . \case
-  LAnd -> "AND"
-  LOr -> "OR"
-  NAdd -> "+"
-  NMul -> "*"
-  NSub -> "-"
-  NDiv -> "/"
-  NMod -> "%"
-  GLike -> "LIKE"
+  LAnd      -> "AND"
+  LOr       -> "OR"
+  NAdd      -> "+"
+  NMul      -> "*"
+  NSub      -> "-"
+  NDiv      -> "/"
+  NMod      -> "%"
+  GLike     -> "LIKE"
   GOverlaps -> "OVERLAPS"
 
 renderFieldName :: MySQLFieldNameSyntax -> RenderM Builder
@@ -465,6 +467,7 @@ renderValue = \case
   VDay d -> escape . pack . formatTime defaultTimeLocale "%F" $ d
   VLocalTime lt -> escape . pack . formatTime defaultTimeLocale "%F %T%Q" $ lt
   VTimeOfDay tod -> escape . pack . formatTime defaultTimeLocale "%T%Q" $ tod
+  VViaJSON v -> escape . decodeLatin1 . toStrict . encode $ v
 
 renderGrouping :: MySQLGroupingSyntax -> RenderM Builder
 renderGrouping (GroupByExpressions es) =

@@ -108,3 +108,8 @@ following are also demandable:
 * ``Text``, as the IEEE-754 textual approximation of the value.
 * Fixed-width signed integral types, as a truncation of the value, provided it
   'fits' into the representation.
+
+## Via intermediate JSON
+
+In 'strict' mode, only textual types are considered as valid for such
+derivations. In 'lenient' mode, binary types are also permitted.
