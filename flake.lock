@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1603287523,
-        "narHash": "sha256-sGbiWEQ9mQseYnRb6hQbDwqH14Xy4sXbvyYHlgZxc3I=",
+        "lastModified": 1608124323,
+        "narHash": "sha256-5+FseBBqkpoRP+e5Yo1hZlUuxT/Elh7JQjcHSbMZ/DQ=",
         "owner": "juspay",
         "repo": "beam",
-        "rev": "b369dfb2077bc31221130379cc0e705c66f5bdcf",
+        "rev": "d36b29726570b6c5d228bee44d169282fe99ebdb",
         "type": "github"
       },
       "original": {
@@ -26,10 +26,10 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1602937665,
-        "narHash": "sha256-D55WYDBLTo8cLIKmuqK1Mwqp+xm0XaJd3EJQg8VNzZo=",
-        "ref": "wip",
-        "rev": "a086c401bb812c73fabfc561d746fcf582a17799",
+        "lastModified": 1608151459,
+        "narHash": "sha256-NGmuXsADASPYKm/xtl+a5zTVK/Cw3ursa6bPrAGmgKQ=",
+        "ref": "master",
+        "rev": "fd6f0a53d4fd5d22739251067a9641e38a6c5d4d",
         "revCount": 24,
         "type": "git",
         "url": "ssh://git@bitbucket.org/juspay/euler-build"
@@ -59,33 +59,33 @@
         "stdlib": "stdlib"
       },
       "locked": {
-        "lastModified": 1592950149,
-        "narHash": "sha256-tZSz9/WkOrtNbW7U2re4WoFPQ2tQX0I0GpCeoF3fY1M=",
-        "owner": "manveru",
+        "lastModified": 1604413592,
+        "narHash": "sha256-3cr2RRBCXNb+6Q1s3tEQiN4LjoFC8OsMSG8WuCyGe/g=",
+        "owner": "juspay",
         "repo": "nix-inclusive",
-        "rev": "dd80ddcc6850d130b591fbc9b0aacacfbb3cf47c",
+        "rev": "2ca1706029bfcf4bb7eaf17b4f32e49f436a148e",
         "type": "github"
       },
       "original": {
-        "owner": "manveru",
+        "owner": "juspay",
         "repo": "nix-inclusive",
-        "rev": "dd80ddcc6850d130b591fbc9b0aacacfbb3cf47c",
+        "rev": "2ca1706029bfcf4bb7eaf17b4f32e49f436a148e",
         "type": "github"
       }
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1589844680,
-        "narHash": "sha256-I4OYatIJsEZvEUkAGdTlJjAuUuAq7A1GA/kepUQic1o=",
+        "lastModified": 1607690238,
+        "narHash": "sha256-9QFXxj6pjmHr+950E3/gXo9cz50l0AbFCHZR5eixkXw=",
         "owner": "NixOS",
-        "repo": "nixpkgs-channels",
-        "rev": "0f5ce2fac0c726036ca69a5524c59a49e2973dd4",
+        "repo": "nixpkgs",
+        "rev": "8006772a054ce57ca18c5955dcd6ec9a62577473",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "repo": "nixpkgs-channels",
-        "rev": "0f5ce2fac0c726036ca69a5524c59a49e2973dd4",
+        "repo": "nixpkgs",
+        "rev": "8006772a054ce57ca18c5955dcd6ec9a62577473",
         "type": "github"
       }
     },
