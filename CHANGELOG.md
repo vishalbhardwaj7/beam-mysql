@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1.1
+
+* Add a `ParsingMethod` sum type to indicate whether `beam-mysql` was compiled
+  with leniency or not.
+* Provide a `parsingMethod :: ParsingMethod` value, set by CPP according to
+  whether we compiled with leniency or not.
+
 ## 1.2.1.0
 
 * Added a wrapper `ViaJson`, plus instances, to aid unwrapping values packed
