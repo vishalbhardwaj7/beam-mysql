@@ -26,6 +26,7 @@ import           Data.Kind (Type)
 import           Data.Proxy (Proxy (Proxy))
 import           Data.Scientific (Scientific)
 import           Data.Text (Text, pack)
+import           Data.Text.Encoding.Error (UnicodeException)
 import           Data.Text.Lazy (toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8)
 import           Data.Time (Day, LocalTime, TimeOfDay)
@@ -300,6 +301,14 @@ data ColumnDecodeError =
     tablesInvolved :: !(HashSet Text),
     columnIndex    :: {-# UNPACK #-} !Word,
     value          :: {-# UNPACK #-} !Text
+    } |
+  UTFError {
+    utfErrorSpecifics :: !UnicodeException,
+    demandedType      :: {-# UNPACK #-} !Text,
+    sqlType           :: {-# UNPACK #-} !Text,
+    tablesInvolved    :: !(HashSet Text),
+    columnIndex       :: {-# UNPACK #-} !Word,
+    value             :: {-# UNPACK #-} !Text
     }
   deriving stock (Eq, Show)
 
@@ -466,6 +475,7 @@ runDecode (Decode comp) v tables =
               TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
               Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
               NotValidJSON   -> JSONError tyName ft tables ix' v'
+              UTFInvalid utfErr -> UTFError utfErr tyName ft tables ix' v'
             IEEENaN -> LenientUnexpectedNaN tyName ft tables ix'
             IEEEInfinity -> LenientUnexpectedInfinity tyName ft tables ix' v'
             IEEETooSmall -> LenientTooSmallToFit tyName ft tables ix' v'
@@ -524,10 +534,11 @@ runDecode (Decode comp) v tables =
             v' = pack . show . snd $ v V.! lastIx
             tyName = tyConNameText typ in
           case err of
-            UnexpectedNull -> FoundUnexpectedNull tyName ft tables ix'
-            TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
-            Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
-            NotValidJSON   -> JSONError tyName ft tables ix' v'
+            UnexpectedNull    -> FoundUnexpectedNull tyName ft tables ix'
+            TypeMismatch      -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
+            Won'tFit          -> ValueWon'tFitIntoType tyName ft tables ix' v'
+            NotValidJSON      -> JSONError tyName ft tables ix' v'
+            UTFInvalid utfErr -> UTFError utfErr tyName ft tables ix' v'
 
 decodeFromRow :: Int -> FromBackendRowF MySQL (Decode a) -> Decode a
 decodeFromRow needed = \case

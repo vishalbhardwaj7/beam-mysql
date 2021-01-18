@@ -14,7 +14,8 @@ import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
 import           Data.Scientific (Scientific, toBoundedInteger)
 import           Data.Text (Text, pack, unpack)
-import           Data.Text.Encoding (decodeUtf8, encodeUtf8)
+import           Data.Text.Encoding (decodeUtf8', encodeUtf8)
+import           Data.Text.Encoding.Error (UnicodeException)
 import           Data.Time (Day, LocalTime (LocalTime), TimeOfDay,
                             localTimeToUTC, midnight, utc)
 import           Data.ViaJson (ViaJson (ViaJson))
@@ -28,7 +29,8 @@ data Strict =
   UnexpectedNull |
   TypeMismatch |
   Won'tFit |
-  NotValidJSON
+  NotValidJSON |
+  UTFInvalid !UnicodeException
   deriving stock (Eq, Show)
 
 data Lenient =
@@ -186,7 +188,10 @@ instance FromFieldStrict ByteString where
 instance FromFieldStrict Text where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v -> Right . decodeUtf8 . encodeLatin1 $ v
+    MySQLText v -> case decodeUtf8' . encodeLatin1 $ v of
+      Left err  ->
+        Left . DecodeError (UTFInvalid err) . typeRepTyCon $ (typeRep @Text)
+      Right res -> Right res
     v           -> handleNullOrMismatch v
 
 instance FromFieldStrict LocalTime where
@@ -216,9 +221,12 @@ instance FromFieldStrict TimeOfDay where
 instance (Typeable a, FromJSON a) => FromFieldStrict (ViaJson a) where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v -> case decodeStrict . encodeUtf8 . decodeUtf8 . encodeLatin1 $ v of
-      Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
-      Just x  -> Right . ViaJson $ x
+    MySQLText v -> case decodeUtf8' . encodeLatin1 $ v of
+      Left err  ->
+        Left . DecodeError (UTFInvalid err) . typeRepTyCon $ (typeRep @a)
+      Right res -> case decodeStrict . encodeUtf8 $ res of
+        Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
+        Just x  -> Right . ViaJson $ x
     v           -> handleNullOrMismatch v
 
 instance FromFieldStrict FakeUTC where

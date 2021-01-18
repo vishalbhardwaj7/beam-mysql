@@ -141,4 +141,4 @@ genJsonArray g = Array <$> liftArbitrary g
 
 genJsonObject :: Gen Value
 genJsonObject =
-  Object <$> (scale (`div` 4) . liftArbitrary $ oneof [genJsonBool, genJsonNumber, genJsonString])
+  Object <$> (scale (`div` 8) . liftArbitrary $ oneof [genJsonBool, genJsonNumber, genJsonString])
