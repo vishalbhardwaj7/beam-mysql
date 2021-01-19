@@ -3,6 +3,7 @@
 ## 1.2.2.0
 
 * Stricter checking of UTF-8 decoding in `FromField`.
+* Considerably more documentation.
 
 ## 1.2.1.1
 
