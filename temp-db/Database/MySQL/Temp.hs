@@ -14,7 +14,7 @@ import           Control.Monad.IO.Class (MonadIO (liftIO))
 import           Data.Kind (Type)
 import           Data.String (fromString)
 import           Data.Word (Word16)
-import           Database.MySQL.Base (ConnectInfo (ciDatabase, ciHost, ciPort, ciUser),
+import           Database.MySQL.Base (ConnectInfo (ciCharset, ciDatabase, ciHost, ciPort, ciUser),
                                       defaultConnectInfoMB4)
 import           Fmt ((+|), (|+))
 import           System.Directory (createDirectory, getCurrentDirectory,
@@ -39,7 +39,8 @@ toConnectInfo db = defaultConnectInfoMB4 {
   ciHost = "localhost",
   ciPort = fromIntegral . port $ db,
   ciDatabase = "",
-  ciUser = fromString . user $ db
+  ciUser = fromString . user $ db,
+  ciCharset = 8
   }
 
 withTempDB :: forall (a :: Type) (m :: Type -> Type) .

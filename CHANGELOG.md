@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1.2
+
+* Change test bench defaults to use Latin-1 as the database encoding.
+* Add a test to ensure that Latin-1 encodings don't mangle data.
+
 ## 1.2.1.1
 
 * Add a `ParsingMethod` sum type to indicate whether `beam-mysql` was compiled
