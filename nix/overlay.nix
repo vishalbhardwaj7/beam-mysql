@@ -15,8 +15,6 @@ let
     owner = "juspay";
     repo = "mysql-haskell";
     rev = "dce6811d8d5a492bb57ea4b7453734a9bcc84dd9";
-    // ''.join(hex(c)[2:] for c in base64.b64decode(<new-hash-string-here>))
-    // sha256 = "91bc2b3554fa4d31e9142afff4b8f88428f3979cb49e9a9fe6fae2292b2eb";
   };
 
   mysql-haskell-path = mysql-haskell-repo;
