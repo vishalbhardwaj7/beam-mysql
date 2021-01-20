@@ -14,7 +14,7 @@ let
   mysql-haskell-repo = fetchFromGitHub {
     owner = "juspay";
     repo = "mysql-haskell";
-    rev = "788022d65538db422b02ecc0be138b862d2e5cee";
+    rev = "dce6811d8d5a492bb57ea4b7453734a9bcc84dd9";
     sha256 = "030qq1hgh15zkwa6j6x568d248iyfaw5idj2hh2mvb7j8xd1l4lv";
   };
 
