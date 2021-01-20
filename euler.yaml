@@ -1,0 +1,49 @@
+name: beam-mysql
+allowed-paths:
+  - src
+  - test
+  - temp-db
+  - beam-mysql.cabal
+
+dependencies:
+  euler-build:
+    branch: master
+    revision: fd6f0a53d4fd5d22739251067a9641e38a6c5d4d
+  beam:
+    branch: master
+    revision: d36b29726570b6c5d228bee44d169282fe99ebdb
+
+overrides:
+  record-dot-preprocessor:
+    version: 0.2.7
+    sha256: 0dyn5wpn0p4sc1yw4zq9awrl2aa3gd3jamllfxrg31v3i3l6jvbw
+    source: hackage
+
+  bytestring-lexing:
+    source: github
+    owner: juspay
+    repo: bytestring-lexing
+    commit: 0a46db1139011736687cb50bbd3877d223bcb737
+    sha256: 1jrwhlp8xs4m21xfr843278j3i7h4sxyjpq67l6lzc36pqan9zlz
+  mysql-haskell:
+    source: github
+    owner: juspay
+    repo: mysql-haskell
+    commit: 788022d65538db422b02ecc0be138b862d2e5cee
+    sha256: 030qq1hgh15zkwa6j6x568d248iyfaw5idj2hh2mvb7j8xd1l4lv
+  binary-parsers: {}
+  wire-streams: {}
+  mason:
+    source: hackage
+    version: 0.2.3
+    sha256: 1dcd3n1lxlpjsz92lmr1nsx29mwwglim0gask04668sdiarr3x1v
+
+build-tools:
+- mysql57
+- coreutils
+
+nix-shell-tools:
+- mysql57
+# - haskellPackages.cabal-fmt
+# - ghcide
+# - ghcide-ghc883

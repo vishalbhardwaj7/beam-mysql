@@ -49,7 +49,8 @@ withTempDB act = withTempDBDir go
   where
     go :: FilePath -> m a
     go tmpDir = do
-      userName <- liftIO getLoginName
+      -- userName <- liftIO getLoginName
+      let userName = "nixbld"
       let initDBCmd = buildInitCommand userName tmpDir
       currDir <- liftIO getCurrentDirectory
       bracket (liftIO . setCurrentDirectory $ tmpDir)
