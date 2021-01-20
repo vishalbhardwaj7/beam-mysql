@@ -1,5 +1,6 @@
 # Changelog
 
+
 ## 1.2.1.2
 
 * Change test bench defaults to use Latin-1 as the database encoding.
@@ -22,6 +23,9 @@
 * Ensure that `runInsertRowReturning` throws an exception if asked to work over
   a table without a primary key.
 * More tests.
+* Stricter checking of UTF-8 decoding in `FromField`.
+* Considerably more documentation.
+
 
 ## 1.2.0.0
 

@@ -23,3 +23,5 @@ TAGS
 .nvimrc
 stack.yaml.lock
 *.prof
+dist-newstyle
+cabal.project.local

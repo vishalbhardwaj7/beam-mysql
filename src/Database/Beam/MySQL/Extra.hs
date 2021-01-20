@@ -2,6 +2,7 @@
 {-# LANGUAGE KindSignatures      #-}
 {-# LANGUAGE MonoLocalBinds      #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Trustworthy         #-}
 
 module Database.Beam.MySQL.Extra where
 
@@ -49,6 +50,16 @@ import           Database.MySQL.Base (FieldType, MySQLConn,
 import           Prelude hiding (head, length, null, read, zip)
 import           System.IO.Streams (InputStream, read)
 
+-- | Attempts to render the given 'SqlInsert' into the equivalent SQL text. Will
+-- produce 'Nothing' if the 'SqlInsert' corresponds to inserting no rows, or is
+-- not validly formed.
+--
+-- = Note
+--
+-- Unless you are constructing MySQL ASTs by hand (that is, not using the
+-- Beam-provided type class methods), invalid SQL should never arise.
+--
+-- @since 1.2.2.0
 dumpInsertSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlInsert MySQL table -> Maybe Text
 dumpInsertSQL = \case
@@ -57,12 +68,31 @@ dumpInsertSQL = \case
     Left _                 -> Nothing
     Right (Query query, _) -> Just . toStrict . decodeUtf8 $ query
 
+-- | Attempts to render the given 'SqlSelect' into the equivalent SQL text. Will
+-- produce 'Nothing' if the 'SqlSelect' is not validly formed.
+--
+-- = Note
+--
+-- Unless you are constructing MySQL ASTs by hand (that is, not using the
+-- Beam-provided type class methods), invalid SQL should never arise.
+--
+-- @since 1.2.2.0
 dumpSelectSQL :: forall (a :: Type) .
   SqlSelect MySQL a -> Maybe Text
 dumpSelectSQL (SqlSelect sel) = case renderSelect sel of
   Left _                 -> Nothing
   Right (Query query, _) -> Just . toStrict . decodeUtf8 $ query
 
+-- | Attempts to render the given 'SqlUpdate' into the equivalent SQL text. Will
+-- produce 'Nothing' if the 'SqlUpdate' corresponds to the identity update (that
+-- is, updates no rows), or if it is not validly formed.
+--
+-- = Note
+--
+-- Unless you are constructing MySQL ASTs by hand (that is, not using the
+-- Beam-provided type class methods), invalid SQL should never arise.
+--
+-- @since 1.2.2.0
 dumpUpdateSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlUpdate MySQL table -> Maybe Text
 dumpUpdateSQL = \case
@@ -71,12 +101,59 @@ dumpUpdateSQL = \case
     Left _                 -> Nothing
     Right (Query query, _) -> Just . toStrict . decodeUtf8 $ query
 
+-- | Attempts to render the given 'SqlDelete' into the equivalent SQL text. Will
+-- produce 'Nothing' if the 'SqlDelete' is not validly formed.
+--
+-- = Note
+--
+-- Unless you are constructing MySQL ASTs by hand (that is, not using the
+-- Beam-provided type class methods), invalid SQL should never arise.
+--
+-- @since 1.2.2.0
 dumpDeleteSQL :: forall (table :: (Type -> Type) -> Type) .
   SqlDelete MySQL table -> Maybe Text
 dumpDeleteSQL (SqlDelete _ del) = case renderDelete del of
   Left _                 -> Nothing
   Right (Query query, _) -> Just . toStrict . decodeUtf8 $ query
 
+-- | Attempts to execute an insert, and returns the inserted row if successful.
+--
+-- = Caveats
+--
+-- This operation should /not/ be used outside of a transaction, as it is not
+-- atomic. We cannot check for this, and if run outside of a transaction, the
+-- results of this operation are unspecified - it might fail, or produce the
+-- wrong result, silently and without warning.
+--
+-- The insert should be constructed in such a way that the values being inserted
+-- are produced using only literals, or expressions which are /pure/ (meaning
+-- \'replayable any number of times to the same results\'). If they are not,
+-- this will throw an 'ImpureExpression', which you should be prepared to catch.
+-- As we check this prior to executing anything, if this exception is thrown,
+-- the database will /not/ be modified.
+--
+-- The given insert statement must insert at most a single row. If it inserts
+-- multiple rows, an 'OperationNotSupported' will be thrown, which you should be
+-- prepared to catch. Since this check is done before executing anything, if
+-- this exception is thrown, the database will /not/ be modified.
+--
+-- The table being targeted by the given insert statement must have a primary
+-- key. If it does not, an 'OperationNotSupported' will be thrown. Since this
+-- check is done before executing anything, if this exception is thrown, the
+-- database will /not/ be modified.
+--
+-- = Purity
+--
+-- Literal expressions are always pure. We consider @CURRENT_TIMESTAMP@ to also
+-- be pure, as we assume that 'runInsertRowReturning' is running inside a
+-- transaction. We also assume that @DEFAULT@ is pure, as we do not support
+-- MySQL 8 or later, where it first became (possibly) impure.
+--
+-- Any \'compound\' expressions are considered pure if their components all are.
+-- The exception is anything involving sub-@SELECT@s; this analysis is a little
+-- crude, but we don't currently require this functionality.
+--
+-- @since 1.2.2.0
 runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
   (FromBackendRow MySQL (table Identity)) =>
   SqlInsert MySQL table -> MySQLM (Maybe (table Identity))

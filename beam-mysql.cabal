@@ -17,7 +17,7 @@ copyright:
 
 category:      Database
 build-type:    Simple
-tested-with:   GHC ==8.8.3
+tested-with:   GHC ==8.8.4
 
 source-repository head
   type:     git

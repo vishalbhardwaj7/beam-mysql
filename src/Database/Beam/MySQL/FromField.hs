@@ -14,7 +14,8 @@ import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
 import           Data.Scientific (Scientific, toBoundedInteger)
 import           Data.Text (Text, pack, unpack)
-import           Data.Text.Encoding (decodeUtf8, encodeUtf8)
+import           Data.Text.Encoding (decodeUtf8', encodeUtf8)
+import           Data.Text.Encoding.Error (UnicodeException)
 import           Data.Time (Day, LocalTime (LocalTime), TimeOfDay,
                             localTimeToUTC, midnight, utc)
 import           Data.ViaJson (ViaJson (ViaJson))
@@ -28,7 +29,8 @@ data Strict =
   UnexpectedNull |
   TypeMismatch |
   Won'tFit |
-  NotValidJSON
+  NotValidJSON |
+  UTFInvalid !UnicodeException
   deriving stock (Eq, Show)
 
 data Lenient =
@@ -186,7 +188,7 @@ instance FromFieldStrict ByteString where
 instance FromFieldStrict Text where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v -> Right . decodeUtf8 . encodeLatin1 $ v
+    MySQLText v -> Right $ decodeReencodedUTF8 v
     v           -> handleNullOrMismatch v
 
 instance FromFieldStrict LocalTime where
@@ -216,10 +218,15 @@ instance FromFieldStrict TimeOfDay where
 instance (Typeable a, FromJSON a) => FromFieldStrict (ViaJson a) where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v -> case decodeStrict . encodeUtf8 . decodeUtf8 . encodeLatin1 $ v of
-      Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
-      Just x  -> Right . ViaJson $ x
-    v           -> handleNullOrMismatch v
+    MySQLText v ->
+      let
+        res = decodeReencodedUTF8 v
+      in
+        case decodeStrict . encodeUtf8 $ res of
+          Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
+          Just x  -> Right . ViaJson $ x
+    v ->
+      handleNullOrMismatch v
 
 instance FromFieldStrict FakeUTC where
   {-# INLINABLE fromFieldStrict #-}
@@ -485,3 +492,11 @@ tyCon = typeRepTyCon (typeRep @a)
 -- Reverse-engineered from description of decodeLatin1
 encodeLatin1 :: Text -> ByteString
 encodeLatin1 = Char8.pack . unpack
+
+-- | NOTE: Decode UTF-8 text that was possibly re-encoded as latin1 text.
+--         If it is not re-encoded text, return the original.
+decodeReencodedUTF8 :: Text -> Text
+decodeReencodedUTF8 text =
+  case decodeUtf8' . encodeLatin1 $ text of
+    Left _ -> text
+    Right text' -> text'
