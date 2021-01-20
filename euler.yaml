@@ -1,14 +1,15 @@
 name: beam-mysql
 allowed-paths:
-- src
-- test
-- temp-db
-- beam-mysql.cabal
+  - src
+  - test
+  - temp-db
+  - beam-mysql.cabal
+
 
 dependencies:
   euler-build:
     branch: master
-    revision: aa20a46b6ae5d638c23fa009fb1dd9b07727ffa2
+    revision: fd6f0a53d4fd5d22739251067a9641e38a6c5d4d
   beam:
     branch: master
     revision: d36b29726570b6c5d228bee44d169282fe99ebdb
