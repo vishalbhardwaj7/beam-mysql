@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          beam-mysql
-version:       1.2.1.1
+version:       1.2.2.0
 synopsis:      Connection layer between beam and MySQL/MariaDB
 description:
   Beam driver for MySQL or MariaDB databases, two popular open-source databases.
@@ -17,7 +17,7 @@ copyright:
 
 category:      Database
 build-type:    Simple
-tested-with:   GHC ==8.8.3
+tested-with:   GHC ==8.8.4
 
 source-repository head
   type:     git

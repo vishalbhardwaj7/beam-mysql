@@ -1,12 +1,26 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP         #-}
+{-# LANGUAGE Trustworthy #-}
 
+-- |
+-- Module: Database.Beam.MySQL
+-- Copyright: (C) Travis Authologies 2018
+--            (C) Juspay Techologies Pvt Ltd 2020-21
+-- License: MIT
+-- Maintainer: Koz Ross <koz.ross@retro-freedom.nz>
+-- Portability: GHC only
+-- Stability: Experimental
+--
+-- MySQL/MariaDB back-end for Beam.
 module Database.Beam.MySQL
 (
+  -- * Core
+  ColumnDecodeError (..), MySQLStatementError (..),
   MySQL, MySQLM,
   runInsertRowReturning,
-  ColumnDecodeError (..), MySQLStatementError (..),
   runBeamMySQL, runBeamMySQLDebug,
+  -- * Debugging
   dumpInsertSQL, dumpSelectSQL, dumpUpdateSQL, dumpDeleteSQL,
+  -- * Helpers
   ViaJson(..), FakeUTC(..),
   MySQLValueSyntax,
   ParsingMethod(..),
@@ -22,8 +36,13 @@ import           Database.Beam.MySQL.Syntax.Value
 -- | Describes how the library parses fields.
 --
 -- @since 1.2.1.1
-data ParsingMethod = Lenient | Strict
-  deriving stock (Eq, Show)
+data ParsingMethod =
+  Lenient -- ^ @since 1.2.1.1
+  | Strict -- ^ @since 1.2.1.1
+  deriving stock (
+                  Eq -- ^ @since 1.2.1.1
+                  , Show -- ^ @since 1.2.1.1
+                  )
 
 -- | Specifies what parsing method this instance of the library was compiled
 -- with. The @lenient@ flag determines what this is set to.

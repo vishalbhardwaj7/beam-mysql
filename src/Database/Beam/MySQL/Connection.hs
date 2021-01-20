@@ -1,7 +1,9 @@
 -- Due to RDP plugin. - Koz
 {-# OPTIONS_GHC -Wno-incomplete-record-updates #-}
 {-# LANGUAGE CPP                 #-}
+{-# LANGUAGE DerivingVia         #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Trustworthy         #-}
 {-# LANGUAGE TypeFamilies        #-}
 
 module Database.Beam.MySQL.Connection where
@@ -26,6 +28,7 @@ import           Data.Kind (Type)
 import           Data.Proxy (Proxy (Proxy))
 import           Data.Scientific (Scientific)
 import           Data.Text (Text, pack)
+import           Data.Text.Encoding.Error (UnicodeException)
 import           Data.Text.Lazy (toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8)
 import           Data.Time (Day, LocalTime, TimeOfDay)
@@ -66,182 +69,283 @@ import           System.IO.Streams.Combinators (map, mapM)
 import qualified System.IO.Streams.List as S
 import           Type.Reflection (TyCon, Typeable, tyConName)
 
+-- | Backend type for MySQL and MariaDB.
+--
+-- @since 1.2.2.0
 data MySQL = MySQL
 
+-- | @since 1.2.2.0
 instance BeamSqlBackendIsString MySQL String
 
+-- | @since 1.2.2.0
 instance BeamSqlBackendIsString MySQL Text
 
 #ifdef LENIENT
+-- | @since 1.2.2.0
 instance BeamBackend MySQL where
   type BackendFromField MySQL = FromFieldLenient
 #else
+-- | @since 1.2.2.0
 instance BeamBackend MySQL where
-  type BackendFromField MySQL = FromFieldStrict
+    type BackendFromField MySQL = FromFieldStrict
 #endif
 
+-- | @since 1.2.2.0
 instance BeamSqlBackend MySQL
 
+-- | @since 1.2.2.0
 type instance BeamSqlBackendSyntax MySQL = MySQLSyntax
 
+-- | @since 1.2.2.0
 instance HasQBuilder MySQL where
   buildSqlQuery = buildSql92Query' True
 
 -- Instances for all types we can read using this library from the database
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Bool
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Bool
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Bool
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Int8
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Int8
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Int8
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Int16
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Int16
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Int16
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Int32
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Int32
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Int32
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Int64
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Int64
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Int64
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Int
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Int
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Int
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Word8
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Word8
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Word8
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Word16
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Word16
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Word16
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Word32
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Word32
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Word32
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Word64
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Word64
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Word64
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Word
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Word
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Word
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Float
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Float
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Float
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Double
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Double
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Double
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Scientific
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Scientific
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Scientific
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL SqlNull
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL SqlNull
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL SqlNull
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL ByteString
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL ByteString
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL ByteString
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Text
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Text
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Text
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL LocalTime
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL LocalTime
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL LocalTime
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL Day
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL Day
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL Day
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL TimeOfDay
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL TimeOfDay
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL TimeOfDay
 
+-- | @since 1.2.2.0
 instance (Typeable a, FromJSON a) => FromBackendRow MySQL (ViaJson a)
 
+-- | @since 1.2.2.0
 instance (Typeable a, FromJSON a) => HasSqlEqualityCheck MySQL (ViaJson a)
 
+-- | @since 1.2.2.0
 instance (Typeable a, FromJSON a) => HasSqlQuantifiedEqualityCheck MySQL (ViaJson a)
 
+-- | @since 1.2.2.0
 instance FromBackendRow MySQL FakeUTC
 
+-- | @since 1.2.2.0
 instance HasSqlEqualityCheck MySQL FakeUTC
 
+-- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL FakeUTC
 
+-- | Some possible (but predictable) failure modes of this backend.
+--
+-- @since 1.2.2.0
 data MySQLStatementError =
+  -- | This back-end does not support a given operation in this context.
+  --
+  -- @since 1.2.2.0
   OperationNotSupported {
     operationName :: {-# UNPACK #-} !Text,
     context       :: {-# UNPACK #-} !Text,
     statement     :: {-# UNPACK #-} !Text
     } |
+  -- | This expression would be impure, and therefore cannot be safely replayed.
+  -- This can arise when using 'runInsertRowReturning', as we have to simulate
+  -- this functionality on older versions of MySQL, requiring us to be able to
+  -- replay expressions.
+  --
+  -- @since 1.2.2.0
   ImpureExpression {
     expression :: {-# UNPACK #-} !Text,
     statement  :: {-# UNPACK #-} !Text
     }
-  deriving stock (Eq, Show)
+  deriving stock (
+                  Eq -- ^ @since 1.2.2.0
+                  , Show -- ^ @since 1.2.2.0
+                  )
 
+-- | @since 1.2.2.0
 instance Exception MySQLStatementError
 
+-- | Represents various forms of failure on column decodes.
+--
+-- @since 1.2.2.0
 data ColumnDecodeError =
+  -- | We received a @NULL@ for a column that isn't @NULLABLE@.
+  --
+  -- @since 1.2.2.0
   FoundUnexpectedNull {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
     columnIndex    :: {-# UNPACK #-} !Word
     } |
+  -- | We cannot decode the given SQL type into the demanded Haskell type.
+  --
+  -- @since 1.2.2.0
   Can'tDecodeIntoDemanded {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
@@ -249,6 +353,10 @@ data ColumnDecodeError =
     columnIndex    :: {-# UNPACK #-} !Word,
     value          :: {-# UNPACK #-} !Text
     } |
+  -- | The SQL value provided by the database does not fit into the
+  -- representation of the demanded Haskell type.
+  --
+  -- @since 1.2.2.0
   ValueWon'tFitIntoType {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
@@ -256,12 +364,26 @@ data ColumnDecodeError =
     columnIndex    :: {-# UNPACK #-} !Word,
     value          :: {-# UNPACK #-} !Text
     } |
+  -- | When parsing leniently, we found a NaN. As the demanded type is allowed
+  -- to vary considerably, we cannot handle NaNs in general; in the cases where
+  -- we can't, this error arises.
+  --
+  -- /See also:/ @LENIENT.md@
+  --
+  -- @since 1.2.2.0
   LenientUnexpectedNaN {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
     columnIndex    :: {-# UNPACK #-} !Word
     } |
+  -- | When parsing leniently, we found a negative or positive infinity. As the
+  -- demanded type is allowed to vary considerably, we cannot handle this case
+  -- in general; in those situations where we can't, this error arises.
+  --
+  -- /See also:/ @LENIENT.md@
+  --
+  -- @since 1.2.2.0
   LenientUnexpectedInfinity {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
@@ -269,6 +391,12 @@ data ColumnDecodeError =
     columnIndex    :: {-# UNPACK #-} !Word,
     value          :: {-# UNPACK #-} !Text
     } |
+  -- | When parsing leniently, we found a value that's too negative to fit into
+  -- the representation requested.
+  --
+  -- /See also:/ @LENIENT.md@
+  --
+  -- @since 1.2.2.0
   LenientTooSmallToFit {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
@@ -276,6 +404,13 @@ data ColumnDecodeError =
     columnIndex    :: {-# UNPACK #-} !Word,
     value          :: {-# UNPACK #-} !Text
     } |
+  -- | When parsing leniently, we found a value that's too large (that is, too
+  -- far along the number line in the positive direction) to fit into the
+  -- representation requested.
+  --
+  -- /See also:/ @LENIENT.md@
+  --
+  -- @since 1.2.2.0
   LenientTooBigToFit {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
@@ -283,6 +418,12 @@ data ColumnDecodeError =
     columnIndex    :: {-# UNPACK #-} !Word,
     value          :: {-# UNPACK #-} !Text
     } |
+  -- | When parsing leniently, we could not decode a value of the requested type
+  -- from a textual representation.
+  --
+  -- /See also:/ @LENIENT.md@
+  --
+  -- @since 1.2.2.0
   LenientTextCouldn'tParse {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
@@ -290,19 +431,43 @@ data ColumnDecodeError =
     columnIndex    :: {-# UNPACK #-} !Word,
     value          :: {-# UNPACK #-} !Text
     } |
+  -- | There were not enough fields returned by the database to satisfy the
+  -- requested type.
+  --
+  -- @since 1.2.2.0
   DemandedTooManyFields {
     fieldsAvailable :: {-# UNPACK #-} !Word,
     fieldsDemanded  :: {-# UNPACK #-} !Word
     } |
+  -- | When using the 'ViaJson' newtype wrapper to aid parsing, something went
+  -- wrong with parsing the JSON representation of the desired value.
+  --
+  -- @since 1.2.2.0
   JSONError {
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
     columnIndex    :: {-# UNPACK #-} !Word,
     value          :: {-# UNPACK #-} !Text
+    } |
+  -- | We could not decode Unicode from the data provided by our database for a
+  -- textual value.
+  --
+  -- @since 1.2.2.0
+  UTFError {
+    utfErrorSpecifics :: !UnicodeException,
+    demandedType      :: {-# UNPACK #-} !Text,
+    sqlType           :: {-# UNPACK #-} !Text,
+    tablesInvolved    :: !(HashSet Text),
+    columnIndex       :: {-# UNPACK #-} !Word,
+    value             :: {-# UNPACK #-} !Text
     }
-  deriving stock (Eq, Show)
+  deriving stock (
+                  Eq -- ^ @since 1.2.2.0
+                  , Show -- ^ @since 1.2.2.0
+                  )
 
+-- | @since 1.2.2.0
 instance Exception ColumnDecodeError
 
 -- Small helper for our environment
@@ -311,19 +476,24 @@ data MySQLMEnv =
            {-# UNPACK #-} !MySQLConn |
   ReleaseEnv {-# UNPACK #-} !MySQLConn
 
--- Operational monad
+-- | Operational monad for MySQL/MariaDB Beam actions.
+--
+-- @since 1.2.2.0
 newtype MySQLM (a :: Type) = MySQLM (ReaderT MySQLMEnv IO a)
-  deriving newtype (Functor,
-                    Applicative,
-                    Monad,
-                    MonadIO,
-                    MonadMask,
-                    MonadCatch,
-                    MonadThrow)
+  deriving (Functor -- ^ @since 1.2.2.0
+            , Applicative -- ^ @since 1.2.2.0
+            , Monad -- ^ @since 1.2.2.0
+            , MonadIO -- ^ @since 1.2.2.0
+            , MonadMask -- ^ @since 1.2.2.0
+            , MonadCatch -- ^ @since 1.2.2.0
+            , MonadThrow -- ^ @since 1.2.2.0
+            ) via (ReaderT MySQLMEnv IO)
 
+-- | @since 1.2.2.0
 instance MonadFail MySQLM where
   fail err = error ("Internal error with: " <> err)
 
+-- | @since 1.2.2.0
 instance MonadBeam MySQL MySQLM where
   {-# INLINABLE runNoReturn #-}
   runNoReturn sql = do
@@ -348,11 +518,15 @@ instance MonadBeam MySQL MySQLM where
             drainStream
             (\stream -> callback $ liftIO (read =<< parseRowsIO tables stream))
 
--- Run without debugging
+-- | Run a series of MySQL operations without debugging.
+--
+-- @since 1.2.2.0
 runBeamMySQL :: MySQLConn -> MySQLM a -> IO a
 runBeamMySQL conn (MySQLM comp) = runReaderT comp . ReleaseEnv $ conn
 
--- Run with debugging
+-- | Run a series of MySQL operations with debug output provided by the handler.
+--
+-- @since 1.2.2.0
 runBeamMySQLDebug :: (Text -> IO ()) -> MySQLConn -> MySQLM a -> IO a
 runBeamMySQLDebug dbg conn (MySQLM comp) =
   runReaderT comp . DebugEnv dbg $ conn
@@ -466,6 +640,7 @@ runDecode (Decode comp) v tables =
               TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
               Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
               NotValidJSON   -> JSONError tyName ft tables ix' v'
+              UTFInvalid utfErr -> UTFError utfErr tyName ft tables ix' v'
             IEEENaN -> LenientUnexpectedNaN tyName ft tables ix'
             IEEEInfinity -> LenientUnexpectedInfinity tyName ft tables ix' v'
             IEEETooSmall -> LenientTooSmallToFit tyName ft tables ix' v'
@@ -524,10 +699,11 @@ runDecode (Decode comp) v tables =
             v' = pack . show . snd $ v V.! lastIx
             tyName = tyConNameText typ in
           case err of
-            UnexpectedNull -> FoundUnexpectedNull tyName ft tables ix'
-            TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
-            Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
-            NotValidJSON   -> JSONError tyName ft tables ix' v'
+            UnexpectedNull    -> FoundUnexpectedNull tyName ft tables ix'
+            TypeMismatch      -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
+            Won'tFit          -> ValueWon'tFitIntoType tyName ft tables ix' v'
+            NotValidJSON      -> JSONError tyName ft tables ix' v'
+            UTFInvalid utfErr -> UTFError utfErr tyName ft tables ix' v'
 
 decodeFromRow :: Int -> FromBackendRowF MySQL (Decode a) -> Decode a
 decodeFromRow needed = \case

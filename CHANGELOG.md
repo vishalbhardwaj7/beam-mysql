@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.2.0
+
+* Stricter checking of UTF-8 decoding in `FromField`.
+* Considerably more documentation.
+
 ## 1.2.1.1
 
 * Add a `ParsingMethod` sum type to indicate whether `beam-mysql` was compiled
