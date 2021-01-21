@@ -9,6 +9,7 @@ let
       ../test
       ../temp-db
       ../beam-mysql.cabal
+      ../LICENSE
     ];
   };
 

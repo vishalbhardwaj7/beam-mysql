@@ -20,6 +20,7 @@ let
       ./test
       ./temp-db
       ./beam-mysql.cabal
+      ./LICENSE
     ];
   attr = if devShell then "devShell" else "defaultPackage";
   compat-attr = if devShell then "shellNix" else "defaultNix";
