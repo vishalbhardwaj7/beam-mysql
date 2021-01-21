@@ -5,6 +5,7 @@ allowed-paths:
   - temp-db
   - beam-mysql.cabal
 
+
 dependencies:
   euler-build:
     branch: master
