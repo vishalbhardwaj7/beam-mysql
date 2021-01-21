@@ -4,6 +4,7 @@ allowed-paths:
   - test
   - temp-db
   - beam-mysql.cabal
+  - LICENSE
 
 
 dependencies:
