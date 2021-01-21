@@ -19,8 +19,8 @@ let
   bytestring-lexing-path = bytestring-lexing-repo;
 
   mysql-haskell-repo = builtins.fetchTarball {
-    url = "https://github.com/juspay/mysql-haskell/archive/788022d65538db422b02ecc0be138b862d2e5cee.tar.gz";
-    sha256 = "030qq1hgh15zkwa6j6x568d248iyfaw5idj2hh2mvb7j8xd1l4lv";
+    url = "https://github.com/juspay/mysql-haskell/archive/dce6811d8d5a492bb57ea4b7453734a9bcc84dd9.tar.gz";
+    sha256 = "1sxjj8iawvzym44rxd4wjzrji17qp3sgyahl14732kgsahsjpg4i";
   };
   mysql-haskell-path = mysql-haskell-repo;
 
