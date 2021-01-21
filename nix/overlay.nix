@@ -56,7 +56,7 @@ super.eulerBuild.mkEulerHaskellOverlay self super
     };
     
     beam-mysql = self.eulerBuild.fastBuild {
-      drv = super.haskell.lib.addBuildTools (hself.callCabal2nix "beam-mysql" beam-mysql-src { }) (with self; [ mysql57 coreutils ]);
+      drv = super.haskell.lib.addBuildTools (hself.callCabal2nix "beam-mysql" beam-mysql-src { }) (with self; [ mysql57 coreutils numactl ]);
       overrides = {
         # We want to run tests for our packages most of the time
         runTests = true;

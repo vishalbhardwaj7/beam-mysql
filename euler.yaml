@@ -1,16 +1,16 @@
 name: beam-mysql
 allowed-paths:
-  - src
-  - test
-  - temp-db
-  - beam-mysql.cabal
-  - LICENSE
+- src
+- test
+- temp-db
+- beam-mysql.cabal
+- LICENSE
 
 
 dependencies:
   euler-build:
     branch: master
-    revision: fd6f0a53d4fd5d22739251067a9641e38a6c5d4d
+    revision: aa20a46b6ae5d638c23fa009fb1dd9b07727ffa2
   beam:
     branch: master
     revision: d36b29726570b6c5d228bee44d169282fe99ebdb
@@ -43,6 +43,7 @@ overrides:
 build-tools:
 - mysql57
 - coreutils
+- numactl
 
 nix-shell-tools:
 - mysql57
