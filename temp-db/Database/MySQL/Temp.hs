@@ -49,8 +49,7 @@ withTempDB act = withTempDBDir go
   where
     go :: FilePath -> m a
     go tmpDir = do
-      -- userName <- liftIO getLoginName
-      let userName = "nixbld"
+      userName <- liftIO getLoginName
       let initDBCmd = buildInitCommand userName tmpDir
       currDir <- liftIO getCurrentDirectory
       bracket (liftIO . setCurrentDirectory $ tmpDir)
@@ -90,7 +89,7 @@ buildInitCommand userName tmpDir = shell $
   userName |+
   " --datadir=" +|
   tmpDir |+
-  " --explicit-defaults-for-timestamp --log-error-verbosity=1"
+  " --explicit-defaults-for-timestamp --log-error-verbosity=1 --character-set-server=latin1 --collation-server=latin1_swedish_ci"
 
 buildRunCommand :: String -> FilePath -> String -> ProcessConfig () () ()
 buildRunCommand userName tmpDir sock = shell $
@@ -100,4 +99,4 @@ buildRunCommand userName tmpDir sock = shell $
   tmpDir |+
   " --socket=" +|
   sock |+
-  " --log-error-verbosity=1"
+  " --log-error-verbosity=1 --character-set-server=latin1 --collation-server=latin1_swedish_ci"

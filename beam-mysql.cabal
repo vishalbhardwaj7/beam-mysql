@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          beam-mysql
-version:       1.2.1.2
+version:       1.2.3.0
 synopsis:      Connection layer between beam and MySQL/MariaDB
 description:
   Beam driver for MySQL or MariaDB databases, two popular open-source databases.
@@ -28,7 +28,7 @@ source-repository head
 common common-lang
   ghc-options:
     -Wall -Wcompat -Wincomplete-record-updates
-    -Wincomplete-uni-patterns -Wredundant-constraints
+    -Wincomplete-uni-patterns -Wredundant-constraints -Werror
     -fplugin=RecordDotPreprocessor
 
   build-depends:
@@ -73,6 +73,14 @@ common common-bench
     , fmt
     , mysql-temp
 
+common common-tasty-test
+  import:        common-lang
+  ghc-options:   -threaded -O2 -with-rtsopts=-N1
+  build-depends:
+    , beam-mysql
+    , mysql-temp
+    , tasty
+
 common common-test
   import:         common-lang
   ghc-options:    -O2 -threaded -with-rtsopts=-N
@@ -109,6 +117,7 @@ library
     Database.Beam.MySQL.Syntax.Select
     Database.Beam.MySQL.Syntax.Update
     Database.Beam.MySQL.Syntax.Value
+    Database.Beam.MySQL.TextHandling
     Database.Beam.MySQL.Utils
 
   build-depends:
@@ -203,10 +212,14 @@ test-suite bobby-tables
   hs-source-dirs: test/bobby-tables
 
 test-suite unicode
-  import:         common-test
+  import:         common-tasty-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  build-depends:  vector
+  build-depends:
+    , fmt
+    , split
+    , tasty-hunit
+
   hs-source-dirs: test/unicode
 
 test-suite run-insert-returning

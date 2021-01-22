@@ -37,13 +37,14 @@ Which gives `decodeUtf8 . encodeLatin1 . decodeLatin1 = decodeUtf8`.
 
 module Database.Beam.MySQL.TextHandling
   (
-
+    encodeText, decodeText
   )
 where
 
-import qualified Aeson
-import           Data.Text (Text)
-import           Data.Text.Encoding (decodeLatin1, encodeUtf8)
+import           Data.ByteString (ByteString)
+import qualified Data.ByteString.Char8 as Char8
+import           Data.Text (Text, unpack)
+import           Data.Text.Encoding (decodeLatin1, decodeUtf8', encodeUtf8)
 
 -- | Re-encode unicode at UTF8-encoded latin1 text.
 --
@@ -58,10 +59,9 @@ encodeText = decodeLatin1 . encodeUtf8
 -- NOTE: Use this function to decode any text coming from mysql-haskell.
 --
 decodeText :: Text -> Text
-decodeText =
-  case decodeUtf8' . encodeLatin1 $ text of
-    Left _ -> text
-    Right text' -> text'
+decodeText text = case decodeUtf8' . encodeLatin1 $ text of
+  Left _      -> text
+  Right text' -> text'
 
 -----------------------------------------------------------------------------
 -- Helpers

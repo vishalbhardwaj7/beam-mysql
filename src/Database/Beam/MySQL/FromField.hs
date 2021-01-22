@@ -8,19 +8,18 @@ module Database.Beam.MySQL.FromField where
 import           Data.Aeson (FromJSON, decodeStrict)
 import           Data.Bits (Bits (zeroBits), toIntegralSized)
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as Char8
 import           Data.FakeUTC (FakeUTC (FakeUTC))
 import           Data.Int (Int16, Int32, Int64, Int8)
 import           Data.Kind (Type)
 import           Data.Scientific (Scientific, toBoundedInteger)
 import           Data.Text (Text, pack, unpack)
-import           Data.Text.Encoding (decodeUtf8', encodeUtf8)
-import           Data.Text.Encoding.Error (UnicodeException)
+import           Data.Text.Encoding (encodeUtf8)
 import           Data.Time (Day, LocalTime (LocalTime), TimeOfDay,
                             localTimeToUTC, midnight, utc)
 import           Data.ViaJson (ViaJson (ViaJson))
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (SqlNull (SqlNull))
+import           Database.Beam.MySQL.TextHandling (decodeText)
 import           Database.MySQL.Base (MySQLValue (..))
 import           Text.Read (readMaybe)
 import           Type.Reflection (TyCon, Typeable, typeRep, typeRepTyCon)
@@ -29,8 +28,7 @@ data Strict =
   UnexpectedNull |
   TypeMismatch |
   Won'tFit |
-  NotValidJSON |
-  UTFInvalid !UnicodeException
+  NotValidJSON
   deriving stock (Eq, Show)
 
 data Lenient =
@@ -181,14 +179,13 @@ instance FromFieldStrict SqlNull where
 instance FromFieldStrict ByteString where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v  -> Right . encodeUtf8 $ v
     MySQLBytes v -> Right v
     v            -> handleNullOrMismatch v
 
 instance FromFieldStrict Text where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v -> Right $ decodeReencodedUTF8 v
+    MySQLText v -> Right . decodeText $ v
     v           -> handleNullOrMismatch v
 
 instance FromFieldStrict LocalTime where
@@ -218,13 +215,9 @@ instance FromFieldStrict TimeOfDay where
 instance (Typeable a, FromJSON a) => FromFieldStrict (ViaJson a) where
   {-# INLINABLE fromFieldStrict #-}
   fromFieldStrict = \case
-    MySQLText v ->
-      let
-        res = decodeReencodedUTF8 v
-      in
-        case decodeStrict . encodeUtf8 $ res of
-          Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
-          Just x  -> Right . ViaJson $ x
+    MySQLText v -> case decodeStrict . encodeUtf8 . decodeText $ v of
+      Nothing -> Left . DecodeError NotValidJSON . typeRepTyCon $ (typeRep @a)
+      Just x  -> Right . ViaJson $ x
     v ->
       handleNullOrMismatch v
 
@@ -488,15 +481,3 @@ tyCon :: forall (a :: Type) .
   (Typeable a) =>
   TyCon
 tyCon = typeRepTyCon (typeRep @a)
-
--- Reverse-engineered from description of decodeLatin1
-encodeLatin1 :: Text -> ByteString
-encodeLatin1 = Char8.pack . unpack
-
--- | NOTE: Decode UTF-8 text that was possibly re-encoded as latin1 text.
---         If it is not re-encoded text, return the original.
-decodeReencodedUTF8 :: Text -> Text
-decodeReencodedUTF8 text =
-  case decodeUtf8' . encodeLatin1 $ text of
-    Left _ -> text
-    Right text' -> text'

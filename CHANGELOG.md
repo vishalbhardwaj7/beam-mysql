@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.3.0
+
+* Properly handle Latin-1 vs UTF-8 encoding woes.
+
+## 1.2.2.0
+
+* Many documentation repairs.
 
 ## 1.2.1.2
 

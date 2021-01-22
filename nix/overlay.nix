@@ -20,8 +20,8 @@ let
   bytestring-lexing-path = bytestring-lexing-repo;
 
   mysql-haskell-repo = builtins.fetchTarball {
-    url = "https://github.com/juspay/mysql-haskell/archive/dce6811d8d5a492bb57ea4b7453734a9bcc84dd9.tar.gz";
-    sha256 = "1sxjj8iawvzym44rxd4wjzrji17qp3sgyahl14732kgsahsjpg4i";
+    url = "https://github.com/juspay/mysql-haskell/archive/468c0757ab184fd905752b8e678a02f7f04809c4.tar.gz";
+    sha256 = "1pn68x85f7x9nijnj3n7sd4iqxiwqy90sgf4vag382223lqyvrlx";
   };
   mysql-haskell-path = mysql-haskell-repo;
 
@@ -56,7 +56,7 @@ super.eulerBuild.mkEulerHaskellOverlay self super
     };
     
     beam-mysql = self.eulerBuild.fastBuild {
-      drv = super.haskell.lib.addBuildTools (hself.callCabal2nix "beam-mysql" beam-mysql-src { }) (with self; [ mysql57 coreutils numactl ]);
+      drv = super.haskell.lib.addBuildTools (hself.callCabal2nix "beam-mysql" beam-mysql-src { }) (with self; [ mysql57 coreutils numactl zlib ]);
       overrides = {
         # We want to run tests for our packages most of the time
         runTests = true;
