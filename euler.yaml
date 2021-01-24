@@ -31,8 +31,8 @@ overrides:
     source: github
     owner: juspay
     repo: mysql-haskell
-    commit: 468c0757ab184fd905752b8e678a02f7f04809c4
-    sha256: 1pn68x85f7x9nijnj3n7sd4iqxiwqy90sgf4vag382223lqyvrlx
+    commit: 788022d65538db422b02ecc0be138b862d2e5cee
+    sha256: 030qq1hgh15zkwa6j6x568d248iyfaw5idj2hh2mvb7j8xd1l4lv
   binary-parsers: {}
   wire-streams: {}
   mason:
