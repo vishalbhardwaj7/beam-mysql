@@ -23,6 +23,7 @@
         ];
         shellTools = with nixpkgs; [
           mysql57
+          zlib
         ];
         # shellAttrs = {
         # };

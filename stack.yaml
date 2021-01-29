@@ -2,11 +2,11 @@ resolver: lts-15.15
 
 extra-deps:
   - git: https://github.com/juspay/beam
-    commit: f6a35d5361e96c766ae977e9a07fa40c6622808e
+    commit: d36b29726570b6c5d228bee44d169282fe99ebdb
     subdirs:
       - beam-core
   - git: https://github.com/juspay/mysql-haskell
-    commit: 468c0757ab184fd905752b8e678a02f7f04809c4
+    commit: 788022d65538db422b02ecc0be138b862d2e5cee
   # Needed for mysql-haskell
   - tcp-streams-1.0.1.1@sha256:35e9ecfa515797052f8c3c01834d2daebd5e93f3152c7fc98b32652bf6f0c052,2329
   - wire-streams-0.1.1.0@sha256:08816c7fa53b20f52e5c465252c106d9de8e6d9580ec0b6d9f000a34c7bcefc8,2130

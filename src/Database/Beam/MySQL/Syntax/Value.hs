@@ -11,6 +11,7 @@ import           Data.ViaJson (ViaJson (ViaJson))
 import           Data.Word (Word16, Word32, Word64, Word8)
 import           Database.Beam.Backend.SQL (HasSqlValueSyntax (sqlValueSyntax),
                                             SqlNull)
+import           Database.Beam.MySQL.TextHandling (encodeText)
 
 data MySQLValueSyntax =
   VBool !Bool |
@@ -125,12 +126,12 @@ instance HasSqlValueSyntax MySQLValueSyntax ByteString where
 instance HasSqlValueSyntax MySQLValueSyntax Text where
   {-# INLINABLE sqlValueSyntax #-}
   sqlValueSyntax :: Text -> MySQLValueSyntax
-  sqlValueSyntax = VText
+  sqlValueSyntax = VText . encodeText
 
 instance HasSqlValueSyntax MySQLValueSyntax String where
   {-# INLINABLE sqlValueSyntax #-}
   sqlValueSyntax :: String -> MySQLValueSyntax
-  sqlValueSyntax = VText . pack
+  sqlValueSyntax = VText . encodeText . pack
 
 instance HasSqlValueSyntax MySQLValueSyntax Day where
   {-# INLINABLE sqlValueSyntax #-}

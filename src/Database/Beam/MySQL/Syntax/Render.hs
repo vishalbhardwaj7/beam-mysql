@@ -17,7 +17,7 @@ import           Data.HashSet (HashSet, singleton)
 import           Data.Kind (Type)
 import           Data.String (IsString)
 import           Data.Text (Text, pack)
-import           Data.Text.Encoding (decodeLatin1, encodeUtf8)
+import           Data.Text.Encoding (decodeLatin1)
 import           Data.Time.Format (defaultTimeLocale, formatTime)
 import           Data.Vector (Vector, length, toList)
 import           Database.Beam.MySQL.Syntax.DataType (MySQLDataTypeSyntax (..),
@@ -463,7 +463,7 @@ renderValue = \case
   VNothing -> pure "NULL"
   VNull -> pure "NULL"
   VByteString b -> pure . quoteWrap . byteString . escapeBytes $ b
-  VText t -> escape . decodeLatin1 . encodeUtf8 $ t
+  VText t -> escape t
   VDay d -> escape . pack . formatTime defaultTimeLocale "%F" $ d
   VLocalTime lt -> escape . pack . formatTime defaultTimeLocale "%F %T%Q" $ lt
   VTimeOfDay tod -> escape . pack . formatTime defaultTimeLocale "%T%Q" $ tod
