@@ -41,10 +41,11 @@ overrides:
     sha256: 1dcd3n1lxlpjsz92lmr1nsx29mwwglim0gask04668sdiarr3x1v
 
 build-tools:
-- mysql57
 - coreutils
-- numactl
 - zlib
+# moved to `custom-nix`
+# - mysql57
+# - numactl
 
 nix-shell-tools:
 - mysql57
@@ -52,3 +53,17 @@ nix-shell-tools:
 # - haskellPackages.cabal-fmt
 # - ghcide
 # - ghcide-ghc883
+
+custom-nix:
+  insert-binding: |-
+    isDarwin = super.stdenv.isDarwin;
+    linuxBuildTools = with super; lib.optionals (!isDarwin) [ mysql57 numactl ];
+    dontCheckDarwin =
+      if isDarwin then super.haskell.lib.dontCheck else x: x;
+
+  wrap-default-package:
+    left: |-
+      dontCheckDarwin (super.haskell.lib.addBuildTools (
+    right: |-
+      ) linuxBuildTools)
+    

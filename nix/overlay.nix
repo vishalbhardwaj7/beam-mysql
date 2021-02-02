@@ -25,6 +25,10 @@ let
   };
   mysql-haskell-path = mysql-haskell-repo;
 
+  isDarwin = super.stdenv.isDarwin;
+linuxBuildTools = with super; lib.optionals (!isDarwin) [ mysql57 numactl ];
+dontCheckDarwin =
+  if isDarwin then super.haskell.lib.dontCheck else x: x;
 in 
 super.eulerBuild.mkEulerHaskellOverlay self super
   (hself: hsuper: {
@@ -55,11 +59,11 @@ super.eulerBuild.mkEulerHaskellOverlay self super
       } { });
     };
     
-    beam-mysql = self.eulerBuild.fastBuild {
-      drv = super.haskell.lib.addBuildTools (hself.callCabal2nix "beam-mysql" beam-mysql-src { }) (with self; [ mysql57 coreutils numactl zlib ]);
+    beam-mysql = dontCheckDarwin (super.haskell.lib.addBuildTools (self.eulerBuild.fastBuild {
+      drv = super.haskell.lib.addBuildTools (hself.callCabal2nix "beam-mysql" beam-mysql-src { }) (with self; [ coreutils zlib ]);
       overrides = {
         # We want to run tests for our packages most of the time
         runTests = true;
       };
-    };
+    }) linuxBuildTools);
   })
