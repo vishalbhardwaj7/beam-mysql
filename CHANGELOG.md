@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.3.1
+
+* Remove `temp-db` internal library.
+* Merge `gen-select` and `gen-insert` into `generation` test suite.
+* Remove temporary database handling.
+
 ## 1.2.3.0
 
 * Properly handle Latin-1 vs UTF-8 encoding woes.

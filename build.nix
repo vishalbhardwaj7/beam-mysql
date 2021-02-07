@@ -18,7 +18,6 @@ let
       ./nix/overlay.nix
       ./src
       ./test
-      ./temp-db
       ./beam-mysql.cabal
       ./LICENSE
     ];

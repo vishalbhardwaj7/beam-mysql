@@ -2,7 +2,6 @@ name: beam-mysql
 allowed-paths:
 - src
 - test
-- temp-db
 - beam-mysql.cabal
 - LICENSE
 
@@ -66,4 +65,4 @@ custom-nix:
       dontCheckDarwin (super.haskell.lib.addBuildTools (
     right: |-
       ) linuxBuildTools)
-    
+
