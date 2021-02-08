@@ -2,6 +2,7 @@ name: beam-mysql
 allowed-paths:
 - src
 - test
+- db
 - beam-mysql.cabal
 - LICENSE
 

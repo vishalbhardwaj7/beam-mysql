@@ -1,9 +1,11 @@
-{-# LANGUAGE DeriveAnyClass     #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TypeFamilies       #-}
-
 module Main (main) where
 
+import           DB.Nullable (NullableT)
+
+main :: IO ()
+main = _
+
+{-
 import           Control.Exception.Safe (bracket, catch)
 import           Control.Monad (void)
 import           Data.Functor.Identity (Identity)
@@ -20,9 +22,7 @@ import           Database.Beam.MySQL (ColumnDecodeError (FoundUnexpectedNull),
                                       tablesInvolved)
 import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
                                       execute_)
-import           Database.MySQL.Temp (MySQLDB, toConnectInfo, withTempDB)
 import           GHC.Generics (Generic)
-import           Test.Hspec (Spec, before, describe, hspec, it, shouldBe)
 
 main :: IO ()
 main = do
@@ -59,12 +59,12 @@ spec mRes = before (go mRes) $ do
   where
     go :: Maybe a -> IO a
     go = \case
-      Nothing -> fail "Query did not throw, but should have."
+      Nothing  -> fail "Query did not throw, but should have."
       Just res -> pure res
     isUnexpectedNull :: ColumnDecodeError -> Bool
     isUnexpectedNull = \case
       FoundUnexpectedNull{} -> True
-      _ -> False
+      _                     -> False
 
 data TestT (f :: Type -> Type) = TestT
   { _testId   :: Columnar f Int64,
@@ -109,4 +109,4 @@ setUpBadDB conn = do
     insertTest :: Query
     insertTest = Query $
       "insert into test_table (id, data) " <>
-      "values (DEFAULT, NULL);"
+      "values (DEFAULT, NULL);" -}
