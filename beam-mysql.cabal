@@ -143,11 +143,15 @@ test-suite generation
   build-depends:  tasty-hunit
   hs-source-dirs: test/generation
 
---test-suite nullable
---  import:         common-test
---  type:           exitcode-stdio-1.0
---  main-is:        Main.hs
---  hs-source-dirs: test/nullable
+test-suite nullable
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , safe-exceptions
+    , tasty-hunit
+
+  hs-source-dirs: test/nullable
 
 -- test-suite via-json
 --   import:         common-test
