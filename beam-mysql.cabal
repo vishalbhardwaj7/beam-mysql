@@ -130,8 +130,12 @@ library db
   exposed-modules:
     DB
     DB.Nullable
+    DB.ViaJSON
 
-  build-depends:   beam-mysql
+  build-depends:
+    , aeson
+    , beam-mysql
+
   hs-source-dirs:  db
 
 -- Test suites
@@ -157,13 +161,8 @@ test-suite nullable
 --   import:         common-test
 --   type:           exitcode-stdio-1.0
 --   main-is:        Main.hs
---   build-depends:
---     , aeson
---     , QuickCheck            ^>=2.13.2
---     , quickcheck-instances  ^>=0.3.22
--- 
 --   hs-source-dirs: test/via-json
--- 
+
 -- test-suite text-escaping
 --   import:         common-test
 --   type:           exitcode-stdio-1.0

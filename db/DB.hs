@@ -7,6 +7,8 @@ module DB (
 
 import           DB.Nullable (NullableT)
 import qualified DB.Nullable as Nullable
+import           DB.ViaJSON (ViaJSONT)
+import qualified DB.ViaJSON as ViaJSON
 import           Data.Kind (Type)
 import           Database.Beam (Database, DatabaseEntity, DatabaseModification,
                                 DatabaseSettings, TableEntity, dbModification,
@@ -16,8 +18,9 @@ import           Database.Beam (Database, DatabaseEntity, DatabaseModification,
 import           Database.Beam.MySQL (MySQL)
 import           GHC.Generics (Generic)
 
-newtype TestDB (f :: Type -> Type) = TestDB {
-  nullable :: f (TableEntity NullableT)
+data TestDB (f :: Type -> Type) = TestDB {
+  nullable :: f (TableEntity NullableT),
+  viaJson  :: f (TableEntity ViaJSONT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -29,9 +32,17 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
     fields = (dbModification @_ @MySQL) {
       nullable = modifyTableFields $
                   tableModification { Nullable.id = fieldNamed "id",
-                                      Nullable.dat = fieldNamed "data" }
+                                      Nullable.dat = fieldNamed "data" },
+      viaJson = modifyTableFields $
+                  tableModification { ViaJSON.id = fieldNamed "id",
+                                      ViaJSON.fromBool = fieldNamed "from_bool",
+                                      ViaJSON.fromDouble = fieldNamed "from_double",
+                                      ViaJSON.fromString = fieldNamed "from_string",
+                                      ViaJSON.fromArray = fieldNamed "from_array",
+                                      ViaJSON.fromObject = fieldNamed "from_object" }
       }
     names :: DatabaseModification (DatabaseEntity MySQL TestDB) MySQL TestDB
     names = (dbModification @_ @MySQL) {
-      nullable = setEntityName "nullable"
+      nullable = setEntityName "nullable",
+      viaJson = setEntityName "via_json"
       }
