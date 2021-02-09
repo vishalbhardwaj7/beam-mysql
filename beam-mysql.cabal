@@ -138,6 +138,18 @@ library db
 
   hs-source-dirs:  db
 
+library pool
+  import:          common-lang
+  visibility:      private
+  exposed-modules: Pool
+  build-depends:
+    , BoundedChan
+    , lifted-base
+    , monad-control
+    , transformers-base
+
+  hs-source-dirs:  pool
+
 -- Test suites
 
 test-suite generation
@@ -157,11 +169,20 @@ test-suite nullable
 
   hs-source-dirs: test/nullable
 
--- test-suite via-json
---   import:         common-test
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   hs-source-dirs: test/via-json
+test-suite via-json
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , aeson
+    , hedgehog
+    , lifted-base
+    , pool
+    , scientific
+    , tasty-hedgehog
+    , vector
+
+  hs-source-dirs: test/via-json
 
 -- test-suite text-escaping
 --   import:         common-test
