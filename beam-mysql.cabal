@@ -156,7 +156,10 @@ test-suite generation
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  build-depends:  tasty-hunit
+  build-depends:
+    , aeson
+    , tasty-hunit
+
   hs-source-dirs: test/generation
 
 test-suite nullable
@@ -184,13 +187,6 @@ test-suite via-json
 
   hs-source-dirs: test/via-json
 
--- test-suite text-escaping
---   import:         common-test
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   build-depends:  aeson
---   hs-source-dirs: test/text-escaping
--- 
 -- test-suite bobby-tables
 --   import:         common-test
 --   type:           exitcode-stdio-1.0
