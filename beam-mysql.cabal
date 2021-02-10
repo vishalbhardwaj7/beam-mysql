@@ -188,6 +188,16 @@ test-suite via-json
 
   hs-source-dirs: test/via-json
 
+test-suite bobby-tables
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , pool
+    , tasty-hunit
+
+  hs-source-dirs: test/bobby-tables
+
 -- test-suite bobby-tables
 --   import:         common-test
 --   type:           exitcode-stdio-1.0

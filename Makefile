@@ -7,6 +7,9 @@ start: /tmp/mysql
 		--collation-server=latin1_swedish_ci \
 		--init-file=${PWD}/init.sql
 
+purge: 
+	rm -rf /tmp/mysql
+
 /tmp/mysql: 
 	mysqld --initialize-insecure --user=${LOGNAME} \
 		--datadir=$@ --explicit-defaults-for-timestamp \

@@ -21,11 +21,11 @@ create table if not exists via_json (
 );
 
 create table if not exists bobby (
-  id bigint primary key auto_increment,
+  id bigint not null primary key,
   bad_text varchar(255) not null,
   bad_text2 text not null
 );
 
-insert into bobby (bad_text, bad_text2)
-  select 'foo\'', '\'; DROP TABLE students; --\'' from dual
+insert into bobby (id, bad_text, bad_text2)
+  select 1, 'foo\'', '\'; DROP TABLE students; --\'' from dual
   where not exists (select * from bobby);
