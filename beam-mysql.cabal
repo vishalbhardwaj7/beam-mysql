@@ -129,6 +129,7 @@ library db
   visibility:      private
   exposed-modules:
     DB
+    DB.Bobby
     DB.Nullable
     DB.ViaJSON
 

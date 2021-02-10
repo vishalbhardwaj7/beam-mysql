@@ -5,6 +5,8 @@ module DB (
   testDB
   ) where
 
+import           DB.Bobby (BobbyT)
+import qualified DB.Bobby as Bobby
 import           DB.Nullable (NullableT)
 import qualified DB.Nullable as Nullable
 import           DB.ViaJSON (ViaJSONT)
@@ -20,7 +22,8 @@ import           GHC.Generics (Generic)
 
 data TestDB (f :: Type -> Type) = TestDB {
   nullable :: f (TableEntity NullableT),
-  viaJson  :: f (TableEntity ViaJSONT)
+  viaJson  :: f (TableEntity ViaJSONT),
+  bobby    :: f (TableEntity BobbyT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -39,10 +42,15 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
                                       ViaJSON.fromDouble = fieldNamed "from_double",
                                       ViaJSON.fromString = fieldNamed "from_string",
                                       ViaJSON.fromArray = fieldNamed "from_array",
-                                      ViaJSON.fromObject = fieldNamed "from_object" }
+                                      ViaJSON.fromObject = fieldNamed "from_object" },
+      bobby = modifyTableFields $
+                tableModification { Bobby.id = fieldNamed "id",
+                                    Bobby.badText = fieldNamed "bad_text",
+                                    Bobby.badText2 = fieldNamed "bad_text2" }
       }
     names :: DatabaseModification (DatabaseEntity MySQL TestDB) MySQL TestDB
     names = (dbModification @_ @MySQL) {
       nullable = setEntityName "nullable",
-      viaJson = setEntityName "via_json"
+      viaJson = setEntityName "via_json",
+      bobby = setEntityName "bobby"
       }
