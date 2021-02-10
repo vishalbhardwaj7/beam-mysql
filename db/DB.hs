@@ -9,6 +9,8 @@ import           DB.Bobby (BobbyT)
 import qualified DB.Bobby as Bobby
 import           DB.Nullable (NullableT)
 import qualified DB.Nullable as Nullable
+import           DB.Unicode (UnicodeT)
+import qualified DB.Unicode as Unicode
 import           DB.ViaJSON (ViaJSONT)
 import qualified DB.ViaJSON as ViaJSON
 import           Data.Kind (Type)
@@ -23,7 +25,8 @@ import           GHC.Generics (Generic)
 data TestDB (f :: Type -> Type) = TestDB {
   nullable :: f (TableEntity NullableT),
   viaJson  :: f (TableEntity ViaJSONT),
-  bobby    :: f (TableEntity BobbyT)
+  bobby    :: f (TableEntity BobbyT),
+  unicode  :: f (TableEntity UnicodeT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -46,11 +49,15 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
       bobby = modifyTableFields $
                 tableModification { Bobby.id = fieldNamed "id",
                                     Bobby.badText = fieldNamed "bad_text",
-                                    Bobby.badText2 = fieldNamed "bad_text2" }
+                                    Bobby.badText2 = fieldNamed "bad_text2" },
+      unicode = modifyTableFields $
+                  tableModification { Unicode.id = fieldNamed "id",
+                                      Unicode.dat = fieldNamed "data" }
       }
     names :: DatabaseModification (DatabaseEntity MySQL TestDB) MySQL TestDB
     names = (dbModification @_ @MySQL) {
       nullable = setEntityName "nullable",
       viaJson = setEntityName "via_json",
-      bobby = setEntityName "bobby"
+      bobby = setEntityName "bobby",
+      unicode = setEntityName "unicode"
       }

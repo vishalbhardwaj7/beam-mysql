@@ -27,5 +27,10 @@ create table if not exists bobby (
 );
 
 insert into bobby (id, bad_text, bad_text2)
-  select 1, 'foo\'', '\'; DROP TABLE students; --\'' from dual
+  select 1, 'foo\'', '\'; DROP TABLE students; --' from dual
   where not exists (select * from bobby);
+
+create table if not exists unicode (
+  id bigint not null primary key auto_increment,
+  data varchar(255) not null collate latin1_general_cs
+);
