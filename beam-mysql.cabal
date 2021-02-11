@@ -131,6 +131,9 @@ library db
     DB
     DB.Bobby
     DB.Nullable
+    DB.PrimaryKey.AutoInc
+    DB.PrimaryKey.NoAutoInc
+    DB.PrimaryKey.None
     DB.Unicode
     DB.ViaJSON
 
@@ -210,17 +213,6 @@ test-suite unicode
 
   hs-source-dirs: test/unicode
 
--- test-suite unicode
---   import:         common-tasty-test
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   build-depends:
---     , fmt
---     , split
---     , tasty-hunit
--- 
---   hs-source-dirs: test/unicode
--- 
 -- test-suite run-insert-returning
 --   import:         common-test
 --   type:           exitcode-stdio-1.0

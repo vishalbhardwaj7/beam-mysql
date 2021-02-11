@@ -9,6 +9,12 @@ import           DB.Bobby (BobbyT)
 import qualified DB.Bobby as Bobby
 import           DB.Nullable (NullableT)
 import qualified DB.Nullable as Nullable
+import           DB.PrimaryKey.AutoInc (AutoIncT)
+import qualified DB.PrimaryKey.AutoInc as AutoInc
+import           DB.PrimaryKey.NoAutoInc (NoAutoIncT)
+import qualified DB.PrimaryKey.NoAutoInc as NoAutoInc
+import           DB.PrimaryKey.None (NoneT)
+import qualified DB.PrimaryKey.None as None
 import           DB.Unicode (UnicodeT)
 import qualified DB.Unicode as Unicode
 import           DB.ViaJSON (ViaJSONT)
@@ -26,7 +32,10 @@ data TestDB (f :: Type -> Type) = TestDB {
   nullable :: f (TableEntity NullableT),
   viaJson  :: f (TableEntity ViaJSONT),
   bobby    :: f (TableEntity BobbyT),
-  unicode  :: f (TableEntity UnicodeT)
+  unicode  :: f (TableEntity UnicodeT),
+  pkNoAi   :: f (TableEntity NoAutoIncT),
+  pkAi     :: f (TableEntity AutoIncT),
+  noPk     :: f (TableEntity NoneT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -52,12 +61,24 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
                                     Bobby.badText2 = fieldNamed "bad_text2" },
       unicode = modifyTableFields $
                   tableModification { Unicode.id = fieldNamed "id",
-                                      Unicode.dat = fieldNamed "data" }
+                                      Unicode.dat = fieldNamed "data" },
+      pkNoAi = modifyTableFields $
+                  tableModification { NoAutoInc.id = fieldNamed "id",
+                                      NoAutoInc.dat = fieldNamed "data" },
+      pkAi = modifyTableFields $
+                  tableModification { AutoInc.id = fieldNamed "id",
+                                      AutoInc.dat = fieldNamed "data" },
+      noPk = modifyTableFields $
+                  tableModification { None.id = fieldNamed "id",
+                                      None.dat = fieldNamed "data" }
       }
     names :: DatabaseModification (DatabaseEntity MySQL TestDB) MySQL TestDB
     names = (dbModification @_ @MySQL) {
       nullable = setEntityName "nullable",
       viaJson = setEntityName "via_json",
       bobby = setEntityName "bobby",
-      unicode = setEntityName "unicode"
+      unicode = setEntityName "unicode",
+      pkNoAi = setEntityName "pk_no_ai",
+      pkAi = setEntityName "pk_ai",
+      noPk = setEntityName "no_pk"
       }

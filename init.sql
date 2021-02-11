@@ -34,3 +34,18 @@ create table if not exists unicode (
   id bigint not null primary key auto_increment,
   data varchar(255) not null collate latin1_general_cs
 );
+
+create table if not exists pk_ai (
+  id bigint not null primary key auto_increment,
+  data varchar(255) not null collate latin1_general_cs
+);
+
+create table if not exists pk_no_ai (
+  id bigint not null primary key,
+  data varchar(255) not null collate latin1_general_cs
+);
+
+create table if not exists no_pk (
+  id bigint not null,
+  data varchar(255) not null collate latin1_general_cs
+);
