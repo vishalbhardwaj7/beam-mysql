@@ -89,7 +89,7 @@ spec (errSmall, errBig) = do
     isCan'tDecode :: ColumnDecodeError -> Bool
     isCan'tDecode = \case
       Can'tDecodeIntoDemanded{} -> True
-      _ -> False
+      _                         -> False
 
 data TestT (f :: Type -> Type) = TestT
   {

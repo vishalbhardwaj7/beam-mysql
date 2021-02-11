@@ -130,6 +130,7 @@ library db
   exposed-modules:
     DB
     DB.Bobby
+    DB.Latin1
     DB.Nullable
     DB.PrimaryKey.AutoInc
     DB.PrimaryKey.NoAutoInc
@@ -226,6 +227,16 @@ test-suite run-insert-returning
 
   hs-source-dirs: test/run-insert-returning
 
+test-suite latin1
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , bytestring
+    , tasty-hunit
+
+  hs-source-dirs: test/latin1
+
 -- test-suite bad-schemata
 --   import:         common-test
 --   type:           exitcode-stdio-1.0
@@ -247,16 +258,6 @@ test-suite run-insert-returning
 -- 
 --   if !flag(lenient)
 --     buildable: False
--- 
--- test-suite latin1
---   import:         common-test
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   build-depends:
---     , bytestring
---     , vector
--- 
---   hs-source-dirs: test/latin1
 -- 
 -- -- Benchmarks
 -- 

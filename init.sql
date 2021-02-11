@@ -49,3 +49,8 @@ create table if not exists no_pk (
   id bigint not null,
   data varchar(255) not null collate latin1_general_cs
 );
+
+create table if not exists latin1 (
+  id bigint not null primary key auto_increment,
+  data varchar(255) not null collate latin1_general_cs
+);

@@ -7,6 +7,8 @@ module DB (
 
 import           DB.Bobby (BobbyT)
 import qualified DB.Bobby as Bobby
+import           DB.Latin1 (Latin1T)
+import qualified DB.Latin1 as Latin1
 import           DB.Nullable (NullableT)
 import qualified DB.Nullable as Nullable
 import           DB.PrimaryKey.AutoInc (AutoIncT)
@@ -35,7 +37,8 @@ data TestDB (f :: Type -> Type) = TestDB {
   unicode  :: f (TableEntity UnicodeT),
   pkNoAi   :: f (TableEntity NoAutoIncT),
   pkAi     :: f (TableEntity AutoIncT),
-  noPk     :: f (TableEntity NoneT)
+  noPk     :: f (TableEntity NoneT),
+  latin1   :: f (TableEntity Latin1T)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -70,7 +73,10 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
                                       AutoInc.dat = fieldNamed "data" },
       noPk = modifyTableFields $
                   tableModification { None.id = fieldNamed "id",
-                                      None.dat = fieldNamed "data" }
+                                      None.dat = fieldNamed "data" },
+      latin1 = modifyTableFields $
+                  tableModification { Latin1.id = fieldNamed "id",
+                                      Latin1.dat = fieldNamed "data" }
       }
     names :: DatabaseModification (DatabaseEntity MySQL TestDB) MySQL TestDB
     names = (dbModification @_ @MySQL) {
@@ -80,5 +86,6 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
       unicode = setEntityName "unicode",
       pkNoAi = setEntityName "pk_no_ai",
       pkAi = setEntityName "pk_ai",
-      noPk = setEntityName "no_pk"
+      noPk = setEntityName "no_pk",
+      latin1 = setEntityName "latin1"
       }
