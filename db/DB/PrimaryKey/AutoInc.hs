@@ -1,7 +1,9 @@
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module DB.PrimaryKey.AutoInc (AutoIncT(..)) where
 
+import           Data.Functor.Identity (Identity)
 import           Data.Int (Int64)
 import           Data.Kind (Type)
 import           Data.Text (Text)
@@ -23,3 +25,7 @@ instance Table AutoIncT where
     deriving stock (Generic)
     deriving anyclass (Beamable)
   primaryKey = AutoIncTPK . id
+
+deriving stock instance Eq (AutoIncT Identity)
+
+deriving stock instance Show (AutoIncT Identity)

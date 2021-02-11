@@ -1,7 +1,9 @@
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module DB.PrimaryKey.NoAutoInc (NoAutoIncT(..)) where
 
+import           Data.Functor.Identity (Identity)
 import           Data.Int (Int64)
 import           Data.Kind (Type)
 import           Data.Text (Text)
@@ -23,3 +25,7 @@ instance Table NoAutoIncT where
     deriving stock (Generic)
     deriving anyclass (Beamable)
   primaryKey = NoAutoIncTPK . id
+
+deriving stock instance Eq (NoAutoIncT Identity)
+
+deriving stock instance Show (NoAutoIncT Identity)

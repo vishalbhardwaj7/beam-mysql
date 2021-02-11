@@ -1,7 +1,9 @@
-{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveAnyClass     #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module DB.PrimaryKey.None (NoneT(..)) where
 
+import           Data.Functor.Identity (Identity)
 import           Data.Int (Int64)
 import           Data.Kind (Type)
 import           Data.Text (Text)
@@ -23,3 +25,7 @@ instance Table NoneT where
     deriving stock (Generic)
     deriving anyclass (Beamable)
   primaryKey = NoneTPK . id
+
+deriving stock instance Eq (NoneT Identity)
+
+deriving stock instance Show (NoneT Identity)
