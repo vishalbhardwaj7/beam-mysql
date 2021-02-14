@@ -8,6 +8,7 @@ import           Control.Exception.Safe (IOException, bracket, finally)
 import           Control.Monad.IO.Class (liftIO)
 import           DB (noPk, pkAi, pkNoAi, testDB)
 import           DB.PrimaryKey.AutoInc (AutoIncT (AutoIncT))
+import qualified DB.PrimaryKey.AutoInc as AutoInc
 import           DB.PrimaryKey.NoAutoInc (NoAutoIncT (NoAutoIncT))
 import qualified DB.PrimaryKey.NoAutoInc as NoAutoInc
 import           DB.PrimaryKey.None (NoneT (NoneT))
@@ -55,6 +56,9 @@ runTests p = localOption (HedgehogTestLimit . Just $ 1000) .
   testGroup "runInsertRowReturning" $ [
     testCase "Autoincrement primary key table inserts" .
       withResource p $ autoIncProp,
+    testProperty "Autoincrement primary key table inserts with known value" .
+      property .
+      withResource' p $ autoIncProp',
     testProperty "Ordinary table inserts" .
       property .
       withResource' p $ noAutoIncProp,
@@ -83,9 +87,8 @@ autoIncProp _ conn = finally doTest cleanup
     go :: forall s . SqlInsertValues MySQL (AutoIncT (QExpr MySQL s))
     go = insertExpressions [AutoIncT default_ (val_ "foo")]
 
-{-
-autoIncProp :: Int64 -> MySQLConn -> PropertyT IO ()
-autoIncProp i conn = do
+autoIncProp' :: Int64 -> MySQLConn -> PropertyT IO ()
+autoIncProp' i conn = do
   row <- forAll genRow
   LB.finally (roundtrip row) (liftIO cleanup)
   where
@@ -107,7 +110,6 @@ autoIncProp i conn = do
     predicate ::
       forall s . (forall s' . AutoIncT (QExpr MySQL s')) -> QExpr MySQL s Bool
     predicate row = AutoInc.id row ==. val_ i
--}
 
 noAutoIncProp :: Int64 -> MySQLConn -> PropertyT IO ()
 noAutoIncProp i conn = do
