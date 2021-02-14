@@ -5,6 +5,10 @@ module DB (
   testDB
   ) where
 
+import           DB.BadSchema (BadSchemaT)
+import qualified DB.BadSchema as BadSchema
+import           DB.BadSchemaBig (BadSchemaBigT)
+import qualified DB.BadSchemaBig as BadSchemaBig
 import           DB.Bobby (BobbyT)
 import qualified DB.Bobby as Bobby
 import           DB.Latin1 (Latin1T)
@@ -31,14 +35,16 @@ import           Database.Beam.MySQL (MySQL)
 import           GHC.Generics (Generic)
 
 data TestDB (f :: Type -> Type) = TestDB {
-  nullable :: f (TableEntity NullableT),
-  viaJson  :: f (TableEntity ViaJSONT),
-  bobby    :: f (TableEntity BobbyT),
-  unicode  :: f (TableEntity UnicodeT),
-  pkNoAi   :: f (TableEntity NoAutoIncT),
-  pkAi     :: f (TableEntity AutoIncT),
-  noPk     :: f (TableEntity NoneT),
-  latin1   :: f (TableEntity Latin1T)
+  nullable     :: f (TableEntity NullableT),
+  viaJson      :: f (TableEntity ViaJSONT),
+  bobby        :: f (TableEntity BobbyT),
+  unicode      :: f (TableEntity UnicodeT),
+  pkNoAi       :: f (TableEntity NoAutoIncT),
+  pkAi         :: f (TableEntity AutoIncT),
+  noPk         :: f (TableEntity NoneT),
+  latin1       :: f (TableEntity Latin1T),
+  badSchema    :: f (TableEntity BadSchemaT),
+  badSchemaBig :: f (TableEntity BadSchemaBigT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -76,7 +82,16 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
                                       None.dat = fieldNamed "data" },
       latin1 = modifyTableFields $
                   tableModification { Latin1.id = fieldNamed "id",
-                                      Latin1.dat = fieldNamed "data" }
+                                      Latin1.dat = fieldNamed "data" },
+      badSchema = modifyTableFields $
+                    tableModification { BadSchema.id = fieldNamed "id",
+                                        BadSchema.dat = fieldNamed "data" },
+      badSchemaBig = modifyTableFields $
+                      tableModification { BadSchemaBig.id = fieldNamed "id",
+                                          BadSchemaBig.field1 = fieldNamed "field_1",
+                                          BadSchemaBig.field2 = fieldNamed "field_2",
+                                          BadSchemaBig.field3 = fieldNamed "field_3",
+                                          BadSchemaBig.field4 = fieldNamed "field_4" }
       }
     names :: DatabaseModification (DatabaseEntity MySQL TestDB) MySQL TestDB
     names = (dbModification @_ @MySQL) {
@@ -87,5 +102,7 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
       pkNoAi = setEntityName "pk_no_ai",
       pkAi = setEntityName "pk_ai",
       noPk = setEntityName "no_pk",
-      latin1 = setEntityName "latin1"
+      latin1 = setEntityName "latin1",
+      badSchema = setEntityName "bad_schema",
+      badSchemaBig = setEntityName "bad_schema_big"
       }

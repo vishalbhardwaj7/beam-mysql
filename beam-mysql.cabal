@@ -129,6 +129,8 @@ library db
   visibility:      private
   exposed-modules:
     DB
+    DB.BadSchema
+    DB.BadSchemaBig
     DB.Bobby
     DB.Latin1
     DB.Nullable
@@ -237,15 +239,19 @@ test-suite latin1
 
   hs-source-dirs: test/latin1
 
--- test-suite bad-schemata
---   import:         common-test
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   hs-source-dirs: test/bad-schemata
--- 
---   if flag(lenient)
---     buildable: False
--- 
+test-suite bad-schemata
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , pool
+    , tasty-hunit
+
+  hs-source-dirs: test/bad-schemata
+
+  if flag(lenient)
+    buildable: False
+
 -- test-suite leniency
 --   import:         common-test
 --   type:           exitcode-stdio-1.0
