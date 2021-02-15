@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.3.1
+
+* Remove `temp-db` internal library.
+* Merge `gen-select` and `gen-insert` into `generation` test suite.
+* Remove temporary database handling.
+* Remove benchmarks.
+* Expose internals of `MySQLValueSyntax`.
+* Expose `MySQLFieldNameSyntax` and its internals.
+* Expose `MySQLUpdate` and its internals.
+* Expose `MySQLInsertValuesSyntax` type only.
+* Expose `MySQLExpressionSyntax` type only.
+
 ## 1.2.3.0
 
 * Properly handle Latin-1 vs UTF-8 encoding woes.

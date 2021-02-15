@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          beam-mysql
-version:       1.2.3.0
+version:       1.2.3.1
 synopsis:      Connection layer between beam and MySQL/MariaDB
 description:
   Beam driver for MySQL or MariaDB databases, two popular open-source databases.
@@ -13,7 +13,7 @@ license-file:  LICENSE
 author:        Travis Athougies, Juspay Technologies Pvt Ltd
 maintainer:    koz.ross@retro-freedom.nz
 copyright:
-  (C) Travis Authologies 2018 (C) Juspay Technologies Pvt Ltd 2020
+  (C) Travis Authologies 2018 (C) Juspay Technologies Pvt Ltd 2020-21
 
 category:      Database
 build-type:    Simple
@@ -64,37 +64,22 @@ common common-lang
 
   default-language:   Haskell2010
 
-common common-bench
-  import:        common-lang
-  ghc-options:   -O2 -threaded -with-rtsopts=-N
-  build-depends:
-    , beam-mysql
-    , criterion   ^>=1.5.6.2
-    , fmt
-    , mysql-temp
-
-common common-tasty-test
-  import:        common-lang
-  ghc-options:   -threaded -O2 -with-rtsopts=-N1
-  build-depends:
-    , beam-mysql
-    , mysql-temp
-    , tasty
-
 common common-test
-  import:         common-lang
-  ghc-options:    -O2 -threaded -with-rtsopts=-N
+  import:        common-lang
+  ghc-options:   -threaded -O2 -with-rtsopts=-N
   build-depends:
     , beam-mysql
-    , hspec       ^>=2.7.1
-    , mysql-temp
-
-  hs-source-dirs: test
+    , db
+    , tasty
 
 -- Flags
 
 flag lenient
   description: Be lenient when decoding (see LENIENT.md for description).
+  default:     False
+
+flag with-db
+  description: Also build and run tests that require a running test DB.
   default:     False
 
 -- Libraries
@@ -121,7 +106,7 @@ library
     Database.Beam.MySQL.Utils
 
   build-depends:
-    , aeson            >=1.4.7.1
+    , aeson            ^>=1.4.7.1 || ^>=1.5.0.0
     , binary           ^>=0.8.7.0
     , bytestring       ^>=0.10.10.0
     , fmt              ^>=0.6.1.2
@@ -143,49 +128,72 @@ library
 
   hs-source-dirs:  src
 
-library mysql-temp
+library db
   import:          common-lang
   visibility:      private
-  exposed-modules: Database.MySQL.Temp
+  exposed-modules:
+    DB
+    DB.BadSchema
+    DB.BadSchemaBig
+    DB.Bobby
+    DB.Latin1
+    DB.Lenient
+    DB.Nullable
+    DB.PrimaryKey.AutoInc
+    DB.PrimaryKey.NoAutoInc
+    DB.PrimaryKey.None
+    DB.Unicode
+    DB.ViaJSON
+
   build-depends:
-    , directory      ^>=1.3.6.0
-    , filepath       ^>=1.4.2.1
-    , fmt
-    , random         ^>=1.1
-    , typed-process  ^>=0.2.6.0
-    , unix           ^>=2.7.2.2
+    , aeson
+    , beam-mysql
+    , vector
 
-  hs-source-dirs:  temp-db
+  hs-source-dirs:  db
 
-test-suite gen-select
+  if !flag(with-db)
+    buildable: False
+
+library pool
+  import:          common-lang
+  visibility:      private
+  exposed-modules: Pool
+  build-depends:
+    , BoundedChan
+    , lifted-base
+    , monad-control
+    , transformers-base
+
+  hs-source-dirs:  pool
+
+  if !flag(with-db)
+    buildable: False
+
+-- Test suites
+
+test-suite generation
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  hs-source-dirs: test/gen-select
+  build-depends:
+    , aeson
+    , tasty-hunit
 
-test-suite gen-insert
-  import:         common-test
-  type:           exitcode-stdio-1.0
-  main-is:        Main.hs
-  hs-source-dirs: test/gen-insert
+  hs-source-dirs: test/generation
 
 test-suite nullable
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
   build-depends:
-    , bytestring
-    , directory        ^>=1.3.6.0
-    , filepath         ^>=1.4.2.1
-    , fmt
-    , mysql-haskell
-    , random           ^>=1.1
     , safe-exceptions
-    , text
-    , typed-process    ^>=0.2.6.0
-    , unix             ^>=2.7.2.2
+    , tasty-hunit
 
   hs-source-dirs: test/nullable
+
+  if !flag(with-db)
+    buildable: False
 
 test-suite via-json
   import:         common-test
@@ -193,26 +201,33 @@ test-suite via-json
   main-is:        Main.hs
   build-depends:
     , aeson
-    , QuickCheck            ^>=2.13.2
-    , quickcheck-instances  ^>=0.3.22
+    , hedgehog
+    , lifted-base
+    , pool
+    , scientific
+    , tasty-hedgehog
+    , vector
 
   hs-source-dirs: test/via-json
 
-test-suite text-escaping
-  import:         common-test
-  type:           exitcode-stdio-1.0
-  main-is:        Main.hs
-  build-depends:  aeson
-  hs-source-dirs: test/text-escaping
+  if !flag(with-db)
+    buildable: False
 
 test-suite bobby-tables
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
+  build-depends:
+    , pool
+    , tasty-hunit
+
   hs-source-dirs: test/bobby-tables
 
+  if !flag(with-db)
+    buildable: False
+
 test-suite unicode
-  import:         common-tasty-test
+  import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
   build-depends:
@@ -222,32 +237,23 @@ test-suite unicode
 
   hs-source-dirs: test/unicode
 
+  if !flag(with-db)
+    buildable: False
+
 test-suite run-insert-returning
   import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
+  build-depends:
+    , hedgehog
+    , lifted-base
+    , pool
+    , tasty-hedgehog
+    , tasty-hunit
+
   hs-source-dirs: test/run-insert-returning
 
-test-suite bad-schemata
-  import:         common-test
-  type:           exitcode-stdio-1.0
-  main-is:        Main.hs
-  hs-source-dirs: test/bad-schemata
-
-  if flag(lenient)
-    buildable: False
-
-test-suite leniency
-  import:         common-test
-  type:           exitcode-stdio-1.0
-  main-is:        Main.hs
-  build-depends:
-    , ieee754  ^>=0.8.0
-    , vector
-
-  hs-source-dirs: test/leniency
-
-  if !flag(lenient)
+  if !flag(with-db)
     buildable: False
 
 test-suite latin1
@@ -256,20 +262,36 @@ test-suite latin1
   main-is:        Main.hs
   build-depends:
     , bytestring
-    , vector
+    , tasty-hunit
 
   hs-source-dirs: test/latin1
 
--- Benchmarks
+  if !flag(with-db)
+    buildable: False
 
-benchmark insert
-  import:         common-bench
+test-suite bad-schemata
+  import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  hs-source-dirs: bench/insert
+  build-depends:
+    , pool
+    , tasty-hunit
 
-benchmark select
-  import:         common-bench
+  hs-source-dirs: test/bad-schemata
+
+  if (flag(lenient) || !flag(with-db))
+    buildable: False
+
+test-suite leniency
+  import:         common-test
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
-  hs-source-dirs: bench/select
+  build-depends:
+    , ieee754      ^>=0.8.0
+    , tasty-hunit
+    , vector
+
+  hs-source-dirs: test/leniency
+
+  if (!flag(lenient) || !flag(with-db))
+    buildable: False

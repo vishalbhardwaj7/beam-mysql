@@ -1,176 +1,165 @@
-{-# LANGUAGE DeriveAnyClass     #-}
-{-# LANGUAGE RankNTypes         #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TypeFamilies       #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Main (main) where
 
-import           Control.Exception.Safe (bracket, catch)
-import           Data.Foldable (traverse_)
+import           Control.Concurrent (getNumCapabilities)
+import qualified Control.Exception.Lifted as LB
+import           Control.Exception.Safe (IOException, bracket, finally)
+import           Control.Monad.IO.Class (liftIO)
+import           DB (noPk, pkAi, pkNoAi, testDB)
+import           DB.PrimaryKey.AutoInc (AutoIncT (AutoIncT))
+import qualified DB.PrimaryKey.AutoInc as AutoInc
+import           DB.PrimaryKey.NoAutoInc (NoAutoIncT (NoAutoIncT))
+import qualified DB.PrimaryKey.NoAutoInc as NoAutoInc
+import           DB.PrimaryKey.None (NoneT (NoneT))
+import qualified DB.PrimaryKey.None as None
 import           Data.Functor.Identity (Identity)
 import           Data.Int (Int64)
-import           Data.Kind (Type)
-import           Data.Text (Text)
-import           Database.Beam (Beamable, Columnar, Database, DatabaseSettings,
-                                Table (PrimaryKey, primaryKey), TableEntity,
-                                defaultDbSettings)
 import           Database.Beam.MySQL (MySQL,
                                       MySQLStatementError (OperationNotSupported),
                                       runBeamMySQL, runInsertRowReturning)
-import           Database.Beam.Query (QExpr, SqlInsert, default_, insert,
-                                      insertExpressions, insertValues, val_)
-import           Database.MySQL.Base (MySQLConn, Query (Query), close, connect,
-                                      execute_)
-import           Database.MySQL.Temp (toConnectInfo, withTempDB)
-import           GHC.Generics (Generic)
-import           Test.Hspec (SpecWith, beforeAll, describe, hspec, it, shouldBe)
+import           Database.Beam.Query (QExpr, SqlInsertValues, default_, delete,
+                                      insert, insertExpressions, insertValues,
+                                      runDelete, val_, (==.))
+import           Database.MySQL.Base (MySQLConn, ciCharset, ciDatabase, ciHost,
+                                      ciPort, ciUser, close, connect,
+                                      defaultConnectInfoMB4)
+import           Hedgehog (Gen, PropertyT, failure, forAll, property, (===))
+import qualified Hedgehog.Gen as Gen
+import qualified Hedgehog.Range as Range
+import           Pool (Pool, create, release, withResource, withResource')
+import           Test.Tasty (TestTree, defaultMain, localOption, testGroup)
+import           Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
+import           Test.Tasty.Hedgehog (HedgehogTestLimit (HedgehogTestLimit),
+                                      testProperty)
 
 main :: IO ()
-main =
-  withTempDB (\db -> bracket (connect . toConnectInfo $ db)
-                              close
-                              go)
+main = bracket (getNumCapabilities >>= create mkConn)
+               (release dropConn)
+               (defaultMain . runTests)
   where
-    go :: MySQLConn -> IO ()
-    go conn = do
-      setUpDB conn
-      hspec $ do
-        beforeAll (queryPkAi conn) pkAiSpec
-        beforeAll (queryPkNoAi conn) pkNoAiSpec
-        beforeAll (queryNoPk conn) noPkSpec
+    mkConn :: Int64 -> IO MySQLConn
+    mkConn _ = do
+      let connInfo = defaultConnectInfoMB4 {
+                        ciHost = "localhost",
+                        ciPort = 3306,
+                        ciDatabase = "test",
+                        ciUser = "root",
+                        ciCharset = 8
+                        }
+      connect connInfo
+    dropConn :: Int64 -> MySQLConn -> IO ()
+    dropConn _ = close
 
--- Helpers
+runTests :: Pool MySQLConn -> TestTree
+runTests p = localOption (HedgehogTestLimit . Just $ 1000) .
+  testGroup "runInsertRowReturning" $ [
+    testCase "Autoincrement primary key table inserts" .
+      withResource p $ autoIncProp,
+    testProperty "Autoincrement primary key table inserts with known value" .
+      property .
+      withResource' p $ autoIncProp',
+    testProperty "Ordinary table inserts" .
+      property .
+      withResource' p $ noAutoIncProp,
+    testProperty "Erroring on inserts into tables without primary keys" .
+      property .
+      withResource' p $ noPkProp
+    ]
 
-setUpDB :: MySQLConn -> IO ()
-setUpDB conn = traverse_ (execute_ conn) [
-  "create database test;",
-  "use test",
-  makePkAi,
-  makePkNoAi,
-  makeNoPk
-  ]
+autoIncProp :: Int64 -> MySQLConn -> IO ()
+autoIncProp _ conn = finally doTest cleanup
   where
-    makePkAi :: Query
-    makePkAi = Query $
-      "create table pkai (" <>
-      "id bigint primary key auto_increment, " <>
-      "data varchar(255) not null);"
-    makePkNoAi :: Query
-    makePkNoAi = Query $
-      "create table pknoai (" <>
-      "id varchar(255) primary key, " <>
-      "data varchar(255) not null);"
-    makeNoPk :: Query
-    makeNoPk = Query $
-      "create table nopk (" <>
-      "id varchar(255) not null" <>
-      ");"
+    doTest :: IO ()
+    doTest = do
+      res <- runBeamMySQL conn .
+              runInsertRowReturning .
+              insert (pkAi testDB) $
+              go
+      case res of
+        Nothing               -> assertFailure "Should have produced result"
+        Just (AutoIncT _ dat) -> assertEqual "" "foo" dat
+    cleanup :: IO ()
+    cleanup = runBeamMySQL conn . runDelete $ delete (pkAi testDB) predicate
+    predicate ::
+      forall s . (forall s' . AutoIncT (QExpr MySQL s')) -> QExpr MySQL s Bool
+    predicate row = row ==. row
+    go :: forall s . SqlInsertValues MySQL (AutoIncT (QExpr MySQL s))
+    go = insertExpressions [AutoIncT default_ (val_ "foo")]
 
-queryPkAi :: MySQLConn -> IO (Maybe (PkAiT Identity))
-queryPkAi conn = runBeamMySQL conn . runInsertRowReturning $ go
+autoIncProp' :: Int64 -> MySQLConn -> PropertyT IO ()
+autoIncProp' i conn = do
+  row <- forAll genRow
+  LB.finally (roundtrip row) (liftIO cleanup)
   where
-    go :: SqlInsert MySQL PkAiT
-    go = insert (_testPkai testDB) (insertExpressions withDefault)
-    withDefault :: forall s . [PkAiT (QExpr MySQL s)]
-    withDefault = [PkAiT default_ (val_ "foo")]
+    genRow :: Gen (AutoIncT Identity)
+    genRow = AutoIncT i <$> Gen.text (Range.linear 0 10) Gen.unicode
+    roundtrip :: AutoIncT Identity -> PropertyT IO ()
+    roundtrip row = do
+      row' <- LB.handle @_ @IOException (const failure) (liftIO . insertTheRow $ row)
+      Just row === row'
+    insertTheRow :: AutoIncT Identity -> IO (Maybe (AutoIncT Identity))
+    insertTheRow row =
+      runBeamMySQL conn .
+      runInsertRowReturning .
+      insert (pkAi testDB) .
+      insertValues $ [row]
+    cleanup :: IO ()
+    cleanup =
+      runBeamMySQL conn . runDelete $ delete (pkAi testDB) predicate
+    predicate ::
+      forall s . (forall s' . AutoIncT (QExpr MySQL s')) -> QExpr MySQL s Bool
+    predicate row = AutoInc.id row ==. val_ i
 
-queryPkNoAi :: MySQLConn -> IO (Maybe (PkNoAiT Identity))
-queryPkNoAi conn = runBeamMySQL conn . runInsertRowReturning $ go
+noAutoIncProp :: Int64 -> MySQLConn -> PropertyT IO ()
+noAutoIncProp i conn = do
+  row <- forAll genRow
+  LB.finally (roundtrip row) (liftIO cleanup)
   where
-    go :: SqlInsert MySQL PkNoAiT
-    go = insert (_testPknoai testDB) (insertValues [PkNoAiT "foo" "bar"])
+    genRow :: Gen (NoAutoIncT Identity)
+    genRow = NoAutoIncT i <$> Gen.text (Range.linear 0 10) Gen.unicode
+    roundtrip :: NoAutoIncT Identity -> PropertyT IO ()
+    roundtrip row = do
+      row' <- LB.handle @_ @IOException (const failure) (liftIO . insertTheRow $ row)
+      Just row === row'
+    insertTheRow :: NoAutoIncT Identity -> IO (Maybe (NoAutoIncT Identity))
+    insertTheRow row =
+      runBeamMySQL conn .
+      runInsertRowReturning .
+      insert (pkNoAi testDB) .
+      insertValues $ [row]
+    cleanup :: IO ()
+    cleanup =
+      runBeamMySQL conn . runDelete $ delete (pkNoAi testDB) predicate
+    predicate ::
+      forall s . (forall s' . NoAutoIncT (QExpr MySQL s')) -> QExpr MySQL s Bool
+    predicate row = NoAutoInc.id row ==. val_ i
 
-queryNoPk :: MySQLConn -> IO (Maybe MySQLStatementError)
-queryNoPk conn = catch (fmap (const Nothing) .
-                          runBeamMySQL conn .
-                          runInsertRowReturning $ go)
-                       handler
+noPkProp :: Int64 -> MySQLConn -> PropertyT IO ()
+noPkProp i conn = do
+  row <- forAll genRow
+  LB.finally (go row) (liftIO cleanup)
   where
-    go :: SqlInsert MySQL NoPkT
-    go = insert (_testNopk testDB) (insertValues [NoPkT "foo"])
-    handler :: MySQLStatementError -> IO (Maybe MySQLStatementError)
-    handler = pure . Just
-
-pkAiSpec :: SpecWith (Maybe (PkAiT Identity))
-pkAiSpec = describe "Autoincrement primary key table inserts" $ do
-  it "should return on success" $ \res -> do
-    res `shouldBe` Just (PkAiT 1 "foo")
-
-pkNoAiSpec :: SpecWith (Maybe (PkNoAiT Identity))
-pkNoAiSpec = describe "Ordinary table inserts" $
-  it "should return on success" $ \res -> do
-    res `shouldBe` Just (PkNoAiT "foo" "bar")
-
-noPkSpec :: SpecWith (Maybe MySQLStatementError)
-noPkSpec = describe "Inserts into table without primary key" $
-  it "should throw" $ \case
-    Just (OperationNotSupported op c _) -> do
-      op `shouldBe` "Insert row returning without primary key"
-      c `shouldBe` "nopk"
-    _                                   -> fail "Threw wrong exception type."
-
--- Beam boilerplate
-
-data PkAiT (f :: Type -> Type) = PkAiT
-  {
-    _pkaiId   :: Columnar f Int64,
-    _pkaiData :: Columnar f Text
-  }
-  deriving stock (Generic)
-  deriving anyclass (Beamable)
-
-deriving stock instance Eq (PkAiT Identity)
-
-deriving stock instance Show (PkAiT Identity)
-
-instance Table PkAiT where
-  data PrimaryKey PkAiT (f :: Type -> Type) =
-    PkAiPK (Columnar f Int64)
-    deriving stock (Generic)
-    deriving anyclass (Beamable)
-  primaryKey = PkAiPK . _pkaiId
-
-data PkNoAiT (f :: Type -> Type) = PkNoAiT
-  {
-    _pknoaiId   :: Columnar f Text,
-    _plnoaiData :: Columnar f Text
-  }
-  deriving stock (Generic)
-  deriving anyclass (Beamable)
-
-deriving stock instance Eq (PkNoAiT Identity)
-
-deriving stock instance Show (PkNoAiT Identity)
-
-instance Table PkNoAiT where
-  data PrimaryKey PkNoAiT (f :: Type -> Type) =
-    PkNoAiPK (Columnar f Text)
-    deriving stock (Generic)
-    deriving anyclass (Beamable)
-  primaryKey = PkNoAiPK . _pknoaiId
-
-newtype NoPkT (f :: Type -> Type) = NoPkT
-  {
-    _nopkId :: Columnar f Text
-  }
-  deriving stock (Generic)
-  deriving anyclass (Beamable)
-
-instance Table NoPkT where
-  data PrimaryKey NoPkT (f :: Type -> Type) =
-    NoPkPK (Columnar f Text)
-    deriving stock (Generic)
-    deriving anyclass (Beamable)
-  primaryKey = NoPkPK . _nopkId
-
-data TestDB (f :: Type -> Type) = TestDB
-  {
-    _testPkai   :: f (TableEntity PkAiT),
-    _testPknoai :: f (TableEntity PkNoAiT),
-    _testNopk   :: f (TableEntity NoPkT)
-  }
-  deriving stock (Generic)
-  deriving anyclass (Database MySQL)
-
-testDB :: DatabaseSettings MySQL TestDB
-testDB = defaultDbSettings
+    genRow :: Gen (NoneT Identity)
+    genRow = NoneT i <$> Gen.text (Range.linear 0 10) Gen.unicode
+    go :: NoneT Identity -> PropertyT IO ()
+    go row = do
+      res <- LB.catch (liftIO . tryTheInsert $ row) (pure . Just)
+      case res of
+        Just (OperationNotSupported op c _) -> do
+          "Insert row returning without primary key" === op
+          "no_pk" === c
+        _                                   -> failure
+    cleanup :: IO ()
+    cleanup =
+      runBeamMySQL conn . runDelete $ delete (noPk testDB) predicate
+    predicate ::
+      forall s . (forall s' . NoneT (QExpr MySQL s')) -> QExpr MySQL s Bool
+    predicate row = None.id row ==. val_ i
+    tryTheInsert :: NoneT Identity -> IO (Maybe MySQLStatementError)
+    tryTheInsert row = do
+      _ <- runBeamMySQL conn .
+            runInsertRowReturning .
+            insert (noPk testDB) .
+            insertValues $ [row]
+      pure Nothing

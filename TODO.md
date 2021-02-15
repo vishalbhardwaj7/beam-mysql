@@ -1,10 +1,5 @@
 # TODO
 
-* `runInsertRowReturning` does not curently check whether inserted values are
-  constant expressions (that is, safe to 'run' multiple times), potentially
-  giving incorrect false negatives (namely, saying that something didn't insert
-  when it actually did). This can be solved by tagging pure and impure
-  expressions in `Syntax`, and should be done.
 * `toSQLTypeName` is currently brittle, as it treats every type other than the
   ones it explicitly recognizes as `Geometry`. This is largely due to
   `mysql-haskell` not fully supporting every type available in MySQL. This

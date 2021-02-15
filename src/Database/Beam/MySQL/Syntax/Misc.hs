@@ -10,16 +10,31 @@ import           Database.Beam.Backend.SQL (IsSql92AggregationSetQuantifierSynta
                                             IsSql92FieldNameSyntax (..),
                                             IsSql92QuantifierSyntax (..))
 
+-- | Representation of a qualified or unqualified field name.
+--
+-- @since 1.2.3.1
 data MySQLFieldNameSyntax =
+  -- | A field qualified with the name of its table.
+  --
+  -- @since 1.2.3.1
   QualifiedField {
     table :: {-# UNPACK #-} !Text,
     field :: {-# UNPACK #-} !Text
     } |
+  -- | A field without any table associated with it.
+  --
+  -- @since 1.2.3.1
   UnqualifiedField {
     field :: {-# UNPACK #-} !Text
     }
-  deriving stock (Eq, Show)
+  deriving stock (
+    -- | @since 1.2.3.1
+    Eq
+    ,
+    -- | @since 1.2.3.1
+    Show)
 
+-- | @since 1.2.3.1
 instance IsSql92FieldNameSyntax MySQLFieldNameSyntax where
   {-# INLINABLE qualifiedField #-}
   qualifiedField :: Text -> Text -> MySQLFieldNameSyntax

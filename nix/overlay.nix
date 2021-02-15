@@ -7,7 +7,8 @@ let
     paths = [
       ../src
       ../test
-      ../temp-db
+      ../db
+      ../pool
       ../beam-mysql.cabal
       ../LICENSE
     ];

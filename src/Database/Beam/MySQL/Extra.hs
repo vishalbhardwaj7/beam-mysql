@@ -41,6 +41,7 @@ import           Database.Beam.MySQL.Syntax.Select (BinOp (LAnd), CompOp (CEq),
                                                     Projection (..),
                                                     TableHeader (Anonymous),
                                                     TableRowExpression (..))
+import           Database.Beam.MySQL.Syntax.Value (MySQLValueSyntax (..))
 import           Database.Beam.Query (SqlDelete (..), SqlInsert (..),
                                       SqlSelect (..), SqlUpdate (..),
                                       runSelectReturningOne)
@@ -387,6 +388,59 @@ buildPostSelect nam fieldVals pkCols mAICol =
         mapMaybe (uncurry fieldEqExpr) $ fieldVals
     fieldEqExpr :: Text -> MySQLExpressionSyntax -> Maybe MySQLExpressionSyntax
     fieldEqExpr f e = do
+      -- if it's not a primary key column, we can ignore it
+      _ <- find (f ==) pkCols
+      rOp <- case (f ==) <$> mAICol of
+                -- If the autoincrementing column is in our primary key, we have
+                -- more analysis to do.
+                Just True -> pure $ case e of
+                  -- If this is either zero, or NULL, the insert will trigger
+                  -- autoincrement behaviour as per MySQL documentation. If it's
+                  -- anything else, we have to paste a literal.
+                  --
+                  -- Floating-point does not get included in this analysis,
+                  -- since the concept of both 'exact zero' and 'automatic
+                  -- increment' makes no sense.
+                  Value v -> case v of
+                    VInt8 i       -> case i of
+                      0 -> LastInsertId
+                      _ -> e
+                    VInt16 i      -> case i of
+                      0 -> LastInsertId
+                      _ -> e
+                    VInt32 i      -> case i of
+                      0 -> LastInsertId
+                      _ -> e
+                    VInt64 i      -> case i of
+                      0 -> LastInsertId
+                      _ -> e
+                    VWord8 w      -> case w of
+                      0 -> LastInsertId
+                      _ -> e
+                    VWord16 w     -> case w of
+                      0 -> LastInsertId
+                      _ -> e
+                    VWord32 w     -> case w of
+                      0 -> LastInsertId
+                      _ -> e
+                    VWord64 w     -> case w of
+                      0 -> LastInsertId
+                      _ -> e
+                    VScientific s -> if s == 0 then LastInsertId else e
+                    VNull         -> LastInsertId
+                    _             -> e
+                  -- If this is anything else, the only sensible possibility is
+                  -- DEFAULT (our generator and beam together guarantee this).
+                  -- If that's the case, we can just replace it with
+                  -- last_insert_id().
+                  _       -> LastInsertId
+                -- If we don't have an autoincrementing column in our primary
+                -- key, or this isn't it, just paste the value as-was.
+                _         -> pure e
+      let lOp = Field . UnqualifiedField $ f
+      pure . ComparisonOperation CEq Nothing lOp $ rOp
+    {-
+    fieldEqExpr f e = do
       -- if it's not a primary key column, we ignore it
       _ <- find (f ==) pkCols
       rOp <- case (f ==) <$> mAICol of
@@ -397,4 +451,4 @@ buildPostSelect nam fieldVals pkCols mAICol =
               -- or this isn't it, just paste the value as-was
               _         -> pure e
       let lOp = Field . UnqualifiedField $ f
-      pure . ComparisonOperation CEq Nothing lOp $ rOp
+      pure . ComparisonOperation CEq Nothing lOp $ rOp -}
