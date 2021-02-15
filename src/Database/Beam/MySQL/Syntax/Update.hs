@@ -14,13 +14,22 @@ data FieldUpdate = FieldUpdate {
   }
   deriving stock (Eq, Show)
 
+-- | Representation of an @UPDATE@ statement.
+--
+-- @since 1.2.3.1
 data MySQLUpdate = UpdateStmt {
   tableName :: {-# UNPACK #-} !MySQLTableNameSyntax,
   updates   :: {-# UNPACK #-} !(Vector FieldUpdate),
   wher      :: !(Maybe MySQLExpressionSyntax)
   }
-  deriving stock (Eq, Show)
+  deriving stock (
+    -- | @since 1.2.3.1
+    Eq
+    ,
+    -- | @since 1.2.3.1
+    Show)
 
+-- | @since 1.2.3.1
 instance IsSql92UpdateSyntax MySQLUpdate where
   type Sql92UpdateExpressionSyntax MySQLUpdate =
     MySQLExpressionSyntax

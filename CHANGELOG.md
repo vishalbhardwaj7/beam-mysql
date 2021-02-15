@@ -5,6 +5,12 @@
 * Remove `temp-db` internal library.
 * Merge `gen-select` and `gen-insert` into `generation` test suite.
 * Remove temporary database handling.
+* Remove benchmarks.
+* Expose internals of `MySQLValueSyntax`.
+* Expose `MySQLFieldNameSyntax` and its internals.
+* Expose `MySQLUpdate` and its internals.
+* Expose `MySQLInsertValuesSyntax` type only.
+* Expose `MySQLExpressionSyntax` type only.
 
 ## 1.2.3.0
 

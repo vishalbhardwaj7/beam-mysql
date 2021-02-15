@@ -11,11 +11,20 @@ import           Database.Beam.MySQL.Syntax.Select (MySQLExpressionSyntax,
                                                     MySQLTableNameSyntax,
                                                     TableRowExpression (TableRowExpression))
 
+-- | Representation of @VALUES@ in an @INSERT@.
+--
+-- @since 1.2.3.1
 data MySQLInsertValuesSyntax =
   InsertSQLExpressions {-# UNPACK #-} !(Vector TableRowExpression) |
   InsertFromSQL MySQLSelect
-  deriving stock (Eq, Show)
+  deriving stock (
+    -- | @since 1.2.3.1
+    Eq
+    ,
+    -- | @since 1.2.3.1
+    Show)
 
+-- | @since 1.2.3.1
 instance IsSql92InsertValuesSyntax MySQLInsertValuesSyntax where
   type Sql92InsertValuesExpressionSyntax MySQLInsertValuesSyntax =
     MySQLExpressionSyntax

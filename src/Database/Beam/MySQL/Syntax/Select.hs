@@ -174,6 +174,9 @@ data CaseBranch = CaseBranch {
   }
   deriving stock (Eq, Show)
 
+-- | Represents an SQL expression (in any context).
+--
+-- @since 1.2.3.1
 data MySQLExpressionSyntax =
   Value !MySQLValueSyntax |
   Row {-# UNPACK #-} !(Vector MySQLExpressionSyntax) |
@@ -241,8 +244,14 @@ data MySQLExpressionSyntax =
   Concat {-# UNPACK #-} !(Vector MySQLExpressionSyntax) |
   -- This is needed to support runInsertRowReturning.
   LastInsertId
-  deriving stock (Eq, Show)
+  deriving stock (
+    -- | @since 1.2.3.1
+    Eq
+    ,
+    -- | @since 1.2.3.1
+    Show)
 
+-- | @since 1.2.3.1
 instance IsSql92ExpressionSyntax MySQLExpressionSyntax where
   type Sql92ExpressionValueSyntax MySQLExpressionSyntax =
     MySQLValueSyntax

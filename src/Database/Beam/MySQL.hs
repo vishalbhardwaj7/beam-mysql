@@ -22,7 +22,13 @@ module Database.Beam.MySQL
   dumpInsertSQL, dumpSelectSQL, dumpUpdateSQL, dumpDeleteSQL,
   -- * Helpers
   ViaJson(..), FakeUTC(..),
-  MySQLValueSyntax,
+  -- * Syntax types
+  MySQLValueSyntax(..),
+  MySQLFieldNameSyntax(..),
+  MySQLInsertValuesSyntax,
+  MySQLExpressionSyntax,
+  MySQLUpdate(..),
+  -- * Compile-time information
   ParsingMethod(..),
   parsingMethod
 ) where
@@ -31,6 +37,10 @@ import           Data.FakeUTC (FakeUTC (FakeUTC))
 import           Data.ViaJson (ViaJson (ViaJson))
 import           Database.Beam.MySQL.Connection
 import           Database.Beam.MySQL.Extra
+import           Database.Beam.MySQL.Syntax.Insert
+import           Database.Beam.MySQL.Syntax.Misc
+import           Database.Beam.MySQL.Syntax.Select (MySQLExpressionSyntax)
+import           Database.Beam.MySQL.Syntax.Update
 import           Database.Beam.MySQL.Syntax.Value
 
 -- | Describes how the library parses fields.
