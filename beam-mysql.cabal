@@ -78,6 +78,10 @@ flag lenient
   description: Be lenient when decoding (see LENIENT.md for description).
   default:     False
 
+flag with-db
+  description: Also build and run tests that require a running test DB.
+  default:     False
+
 -- Libraries
 
 library
@@ -182,6 +186,9 @@ test-suite nullable
 
   hs-source-dirs: test/nullable
 
+  if !flag(with-db)
+    buildable: False
+
 test-suite via-json
   import:         common-test
   type:           exitcode-stdio-1.0
@@ -197,6 +204,9 @@ test-suite via-json
 
   hs-source-dirs: test/via-json
 
+  if !flag(with-db)
+    buildable: False
+
 test-suite bobby-tables
   import:         common-test
   type:           exitcode-stdio-1.0
@@ -206,6 +216,9 @@ test-suite bobby-tables
     , tasty-hunit
 
   hs-source-dirs: test/bobby-tables
+
+  if !flag(with-db)
+    buildable: False
 
 test-suite unicode
   import:         common-test
@@ -217,6 +230,9 @@ test-suite unicode
     , tasty-hunit
 
   hs-source-dirs: test/unicode
+
+  if !flag(with-db)
+    buildable: False
 
 test-suite run-insert-returning
   import:         common-test
@@ -231,6 +247,9 @@ test-suite run-insert-returning
 
   hs-source-dirs: test/run-insert-returning
 
+  if !flag(with-db)
+    buildable: False
+
 test-suite latin1
   import:         common-test
   type:           exitcode-stdio-1.0
@@ -240,6 +259,9 @@ test-suite latin1
     , tasty-hunit
 
   hs-source-dirs: test/latin1
+
+  if !flag(with-db)
+    buildable: False
 
 test-suite bad-schemata
   import:         common-test
@@ -251,7 +273,7 @@ test-suite bad-schemata
 
   hs-source-dirs: test/bad-schemata
 
-  if flag(lenient)
+  if (flag(lenient) || !flag(with-db))
     buildable: False
 
 test-suite leniency
@@ -265,19 +287,5 @@ test-suite leniency
 
   hs-source-dirs: test/leniency
 
-  if !flag(lenient)
+  if (!flag(lenient) || !flag(with-db))
     buildable: False
-
--- -- Benchmarks
--- 
--- benchmark insert
---   import:         common-bench
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   hs-source-dirs: bench/insert
--- 
--- benchmark select
---   import:         common-bench
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   hs-source-dirs: bench/select
