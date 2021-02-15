@@ -133,6 +133,7 @@ library db
     DB.BadSchemaBig
     DB.Bobby
     DB.Latin1
+    DB.Lenient
     DB.Nullable
     DB.PrimaryKey.AutoInc
     DB.PrimaryKey.NoAutoInc
@@ -143,6 +144,7 @@ library db
   build-depends:
     , aeson
     , beam-mysql
+    , vector
 
   hs-source-dirs:  db
 
@@ -252,19 +254,20 @@ test-suite bad-schemata
   if flag(lenient)
     buildable: False
 
--- test-suite leniency
---   import:         common-test
---   type:           exitcode-stdio-1.0
---   main-is:        Main.hs
---   build-depends:
---     , ieee754  ^>=0.8.0
---     , vector
--- 
---   hs-source-dirs: test/leniency
--- 
---   if !flag(lenient)
---     buildable: False
--- 
+test-suite leniency
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , ieee754      ^>=0.8.0
+    , tasty-hunit
+    , vector
+
+  hs-source-dirs: test/leniency
+
+  if !flag(lenient)
+    buildable: False
+
 -- -- Benchmarks
 -- 
 -- benchmark insert

@@ -13,6 +13,8 @@ import           DB.Bobby (BobbyT)
 import qualified DB.Bobby as Bobby
 import           DB.Latin1 (Latin1T)
 import qualified DB.Latin1 as Latin1
+import           DB.Lenient (LenientT)
+import qualified DB.Lenient as Lenient
 import           DB.Nullable (NullableT)
 import qualified DB.Nullable as Nullable
 import           DB.PrimaryKey.AutoInc (AutoIncT)
@@ -44,7 +46,8 @@ data TestDB (f :: Type -> Type) = TestDB {
   noPk         :: f (TableEntity NoneT),
   latin1       :: f (TableEntity Latin1T),
   badSchema    :: f (TableEntity BadSchemaT),
-  badSchemaBig :: f (TableEntity BadSchemaBigT)
+  badSchemaBig :: f (TableEntity BadSchemaBigT),
+  lenient      :: f (TableEntity LenientT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -91,7 +94,30 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
                                           BadSchemaBig.field1 = fieldNamed "field_1",
                                           BadSchemaBig.field2 = fieldNamed "field_2",
                                           BadSchemaBig.field3 = fieldNamed "field_3",
-                                          BadSchemaBig.field4 = fieldNamed "field_4" }
+                                          BadSchemaBig.field4 = fieldNamed "field_4" },
+      lenient = modifyTableFields $
+                  tableModification { Lenient.id = fieldNamed "id",
+                                      Lenient.int8Varchar = fieldNamed "int8_varchar",
+                                      Lenient.int16Varchar = fieldNamed "int16_varchar",
+                                      Lenient.int32Varchar = fieldNamed "int32_varchar",
+                                      Lenient.int64Varchar = fieldNamed "int64_varchar",
+                                      Lenient.floatVarchar = fieldNamed "float_varchar",
+                                      Lenient.doubleVarchar = fieldNamed "double_varchar",
+                                      Lenient.textTinyint = fieldNamed "text_tinyint",
+                                      Lenient.textSmallint = fieldNamed "text_smallint",
+                                      Lenient.textInt = fieldNamed "text_int",
+                                      Lenient.textBigint = fieldNamed "text_bigint",
+                                      Lenient.textFloat = fieldNamed "text_float",
+                                      Lenient.int8Float = fieldNamed "int8_float",
+                                      Lenient.int16Float = fieldNamed "int16_float",
+                                      Lenient.int32Float = fieldNamed "int32_float",
+                                      Lenient.int64Float = fieldNamed "int64_float",
+                                      Lenient.textDouble = fieldNamed "text_double",
+                                      Lenient.int8Double = fieldNamed "int8_double",
+                                      Lenient.int16Double = fieldNamed "int16_double",
+                                      Lenient.int32Double = fieldNamed "int32_double",
+                                      Lenient.int64Double = fieldNamed "int64_double",
+                                      Lenient.viajsonBinary = fieldNamed "viajson_binary" }
       }
     names :: DatabaseModification (DatabaseEntity MySQL TestDB) MySQL TestDB
     names = (dbModification @_ @MySQL) {
@@ -104,5 +130,6 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
       noPk = setEntityName "no_pk",
       latin1 = setEntityName "latin1",
       badSchema = setEntityName "bad_schema",
-      badSchemaBig = setEntityName "bad_schema_big"
+      badSchemaBig = setEntityName "bad_schema_big",
+      lenient = setEntityName "lenient"
       }
