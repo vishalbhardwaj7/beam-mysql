@@ -8,6 +8,7 @@ let
       ../src
       ../test
       ../db
+      ../pool
       ../beam-mysql.cabal
       ../LICENSE
     ];

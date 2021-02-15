@@ -152,6 +152,9 @@ library db
 
   hs-source-dirs:  db
 
+  if !flag(with-db)
+    buildable: False
+
 library pool
   import:          common-lang
   visibility:      private
@@ -163,6 +166,9 @@ library pool
     , transformers-base
 
   hs-source-dirs:  pool
+
+  if !flag(with-db)
+    buildable: False
 
 -- Test suites
 
