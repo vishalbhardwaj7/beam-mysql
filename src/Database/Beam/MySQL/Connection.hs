@@ -653,9 +653,10 @@ decodeFromRow needed = \case
     -- saw.
     catchError (callback =<< iterM (decodeFromRow needed) opt1)
                (\err -> do
+                  failingIx <- get -- save state in case we blew up
                   put ix -- restore our state to how it was
                   catchError (callback =<< iterM (decodeFromRow needed) opt2)
-                             (\_ -> throwError err))
+                             (\_ -> put failingIx >> throwError err))
   FailParseWith err -> error ("Leaked beam internal with: " <> show err)
 #else
 newtype Decode (a :: Type) =
@@ -710,9 +711,10 @@ decodeFromRow needed = \case
     -- saw.
     catchError (callback =<< iterM (decodeFromRow needed) opt1)
                (\err -> do
+                  failingIx <- get -- save state in case we blew up
                   put ix -- restore our state to how it was
                   catchError (callback =<< iterM (decodeFromRow needed) opt2)
-                             (\_ -> throwError err))
+                             (\_ -> put failingIx >> throwError err))
   FailParseWith err -> error ("Leaked beam internal with: " <> show err)
 #endif
 

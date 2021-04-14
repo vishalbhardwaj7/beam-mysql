@@ -9,6 +9,8 @@ import           DB.BadSchema (BadSchemaT)
 import qualified DB.BadSchema as BadSchema
 import           DB.BadSchemaBig (BadSchemaBigT)
 import qualified DB.BadSchemaBig as BadSchemaBig
+import           DB.BadSchemaNullable (BadSchemaNullableT)
+import qualified DB.BadSchemaNullable as BadSchemaNullable
 import           DB.Bobby (BobbyT)
 import qualified DB.Bobby as Bobby
 import           DB.Latin1 (Latin1T)
@@ -37,17 +39,18 @@ import           Database.Beam.MySQL (MySQL)
 import           GHC.Generics (Generic)
 
 data TestDB (f :: Type -> Type) = TestDB {
-  nullable     :: f (TableEntity NullableT),
-  viaJson      :: f (TableEntity ViaJSONT),
-  bobby        :: f (TableEntity BobbyT),
-  unicode      :: f (TableEntity UnicodeT),
-  pkNoAi       :: f (TableEntity NoAutoIncT),
-  pkAi         :: f (TableEntity AutoIncT),
-  noPk         :: f (TableEntity NoneT),
-  latin1       :: f (TableEntity Latin1T),
-  badSchema    :: f (TableEntity BadSchemaT),
-  badSchemaBig :: f (TableEntity BadSchemaBigT),
-  lenient      :: f (TableEntity LenientT)
+  nullable          :: f (TableEntity NullableT),
+  viaJson           :: f (TableEntity ViaJSONT),
+  bobby             :: f (TableEntity BobbyT),
+  unicode           :: f (TableEntity UnicodeT),
+  pkNoAi            :: f (TableEntity NoAutoIncT),
+  pkAi              :: f (TableEntity AutoIncT),
+  noPk              :: f (TableEntity NoneT),
+  latin1            :: f (TableEntity Latin1T),
+  badSchema         :: f (TableEntity BadSchemaT),
+  badSchemaBig      :: f (TableEntity BadSchemaBigT),
+  badSchemaNullable :: f (TableEntity BadSchemaNullableT),
+  lenient           :: f (TableEntity LenientT)
   }
   deriving stock (Generic)
   deriving anyclass (Database MySQL)
@@ -95,6 +98,12 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
                                           BadSchemaBig.field2 = fieldNamed "field_2",
                                           BadSchemaBig.field3 = fieldNamed "field_3",
                                           BadSchemaBig.field4 = fieldNamed "field_4" },
+      badSchemaNullable = modifyTableFields $
+                            tableModification { BadSchemaNullable.id = fieldNamed "id",
+                                                BadSchemaNullable.field1 = fieldNamed "field_1",
+                                                BadSchemaNullable.field2 = fieldNamed "field_2",
+                                                BadSchemaNullable.field3 = fieldNamed "field_3",
+                                                BadSchemaNullable.field4 = fieldNamed "field_4" },
       lenient = modifyTableFields $
                   tableModification { Lenient.id = fieldNamed "id",
                                       Lenient.int8Varchar = fieldNamed "int8_varchar",
@@ -131,5 +140,6 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
       latin1 = setEntityName "latin1",
       badSchema = setEntityName "bad_schema",
       badSchemaBig = setEntityName "bad_schema_big",
+      badSchemaNullable = setEntityName "bad_schema_nullable",
       lenient = setEntityName "lenient"
       }

@@ -1,5 +1,5 @@
 result
-cabal.project.local
+cabal.project.local*
 dist-newstyle
 cabal.sandbox.config
 .cabal-sandbox

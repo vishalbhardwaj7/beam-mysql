@@ -2,9 +2,10 @@ module Main (main) where
 
 import           Control.Concurrent (getNumCapabilities)
 import           Control.Exception.Safe (bracket, try)
-import           DB (badSchema, badSchemaBig, testDB)
+import           DB (badSchema, badSchemaBig, badSchemaNullable, testDB)
 import           DB.BadSchema (BadSchemaT)
 import           DB.BadSchemaBig (BadSchemaBigT)
+import           DB.BadSchemaNullable (BadSchemaNullableT)
 import           Data.Functor.Identity (Identity)
 import qualified Data.HashSet as HS
 import           Data.Int (Int64)
@@ -43,7 +44,9 @@ runTests p = testGroup "Bad schemata" [
   testCase "Errors on mistyped fields (simple)" .
     withResource p $ simpleTests,
   testCase "Errors on mistyped fields (complex)" .
-    withResource p $ complexTests
+    withResource p $ complexTests,
+  testCase "Errors on mistyped fields (nullable)" .
+    withResource p $ nullableTests
   ]
   where
     simpleTests :: Int64 -> MySQLConn -> IO ()
@@ -74,6 +77,20 @@ runTests p = testGroup "Bad schemata" [
           assertEqual "Reports value found" "MySQLText \"bar\"" . value $ err
         _                              ->
           assertFailure "Wrong type of error indicated."
+    nullableTests :: Int64 -> MySQLConn -> IO ()
+    nullableTests _ conn = do
+      res <- try . runNullableQuery $ conn
+      case res of
+        Right _ ->
+          assertFailure "Got a result, but was meant to throw."
+        Left err@Can'tDecodeIntoDemanded{} -> do
+          assertBool "Contains table name" . HS.member "bad_schema_nullable" . tablesInvolved $ err
+          assertEqual "IndicatesColumn" 4 . columnIndex $ err
+          assertEqual "States expected type" "Double" . demandedType $ err
+          assertEqual "States SQL type" "MySQL Long" . sqlType $ err
+          assertEqual "Reports value found" "MySQLInt32 15" . value $ err
+        _ ->
+          assertFailure "Wrong type of error indicated."
 
 runSimpleQuery ::
   MySQLConn -> IO (Maybe (BadSchemaT Identity))
@@ -92,3 +109,12 @@ runComplexQuery conn =
   select .
   all_ .
   badSchemaBig $ testDB
+
+runNullableQuery ::
+  MySQLConn -> IO (Maybe (BadSchemaNullableT Identity))
+runNullableQuery conn =
+  runBeamMySQL conn .
+  runSelectReturningOne .
+  select .
+  all_ .
+  badSchemaNullable $ testDB
