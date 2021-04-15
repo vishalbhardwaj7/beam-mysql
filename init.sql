@@ -76,6 +76,18 @@ insert into bad_schema_big (id, field_1, field_2, field_3, field_4)
   select 1, 0, 'bar', NULL, 10 from dual
   where not exists (select * from bad_schema_big);
 
+create table if not exists bad_schema_nullable (
+  id bigint not null primary key,
+  field_1 varchar(255),
+  field_2 bigint,
+  field_3 bit(1),
+  field_4 int
+);
+
+insert into bad_schema_nullable (id, field_1, field_2, field_3, field_4)
+  select 1, 'bar', 15, 0, 15 from dual
+  where not exists (select * from bad_schema_nullable);
+
 create table if not exists lenient (
   id bigint not null primary key,
   int8_varchar varchar(255) not null,

@@ -135,6 +135,7 @@ library db
     DB
     DB.BadSchema
     DB.BadSchemaBig
+    DB.BadSchemaNullable
     DB.Bobby
     DB.Latin1
     DB.Lenient
