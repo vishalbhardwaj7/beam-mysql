@@ -47,13 +47,14 @@ import           Database.Beam.MySQL.Syntax.Render (RenderError (..),
                                                     renderSelect, renderUpdate)
 import           Database.Beam.MySQL.Utils (toSQLTypeName)
 #ifdef LENIENT
-import           Database.Beam.MySQL.FromField (DecodeError (DecodeError),
-                                                FromFieldLenient (fromFieldLenient),
-                                                Lenient (..), Strict (..))
+import           Database.Beam.MySQL.FromField.DecodeError (DecodeError (DecodeError),
+                                                            Lenient (IEEEInfinity, IEEENaN, IEEETooBig, IEEETooSmall, SomeStrict, TextCouldNotParse),
+                                                            Strict (NotValidJSON, TypeMismatch, UnexpectedNull, Won'tFit))
+import           Database.Beam.MySQL.FromField.Lenient (FromField (fromField))
 #else
-import           Database.Beam.MySQL.FromField (DecodeError (DecodeError),
-                                                FromFieldStrict (fromFieldStrict),
-                                                Strict (..))
+import           Database.Beam.MySQL.FromField.DecodeError (DecodeError (DecodeError),
+                                                            Strict (NotValidJSON, TypeMismatch, UnexpectedNull, Won'tFit))
+import           Database.Beam.MySQL.FromField.Strict (FromField (fromField))
 #endif
 import           Database.Beam.MySQL.Syntax (MySQLSyntax (..))
 import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
@@ -79,15 +80,9 @@ instance BeamSqlBackendIsString MySQL String
 -- | @since 1.2.2.0
 instance BeamSqlBackendIsString MySQL Text
 
-#ifdef LENIENT
--- | @since 1.2.2.0
+-- | @since 1.3.0.0
 instance BeamBackend MySQL where
-  type BackendFromField MySQL = FromFieldLenient
-#else
--- | @since 1.2.2.0
-instance BeamBackend MySQL where
-    type BackendFromField MySQL = FromFieldStrict
-#endif
+  type BackendFromField MySQL = FromField
 
 -- | @since 1.2.2.0
 instance BeamSqlBackend MySQL
@@ -632,32 +627,6 @@ runDecode (Decode comp) v tables =
             IEEETooSmall -> LenientTooSmallToFit tyName ft tables ix' v'
             IEEETooBig -> LenientTooBigToFit tyName ft tables ix' v'
             TextCouldNotParse -> LenientTextCouldn'tParse tyName ft tables ix' v'
-
-decodeFromRow :: Int -> FromBackendRowF MySQL (Decode a) -> Decode a
-decodeFromRow needed = \case
-  ParseOneField callback -> do
-    curr <- currentValue
-    case curr of
-      Nothing -> throwError . Left $ needed
-      Just val -> case fromFieldLenient val of
-        Left err -> throwError . Right $ err
-        Right x  -> advanceIndex >> callback x
-  Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
-    ix <- get -- save state
-    -- The 'catch-in-catch' here is needed due to the rather peculiar way beam
-    -- parses NULLable columns. Essentially, it first tries to grab a non-NULL
-    -- value, then, if it fails, tries to unconditionally grab a NULL.
-    --
-    -- This is encoded as an Alt. Therefore, if we don't want strange false
-    -- positives regarding NULL parses, we have to forward the _first_ error we
-    -- saw.
-    catchError (callback =<< iterM (decodeFromRow needed) opt1)
-               (\err -> do
-                  failingIx <- get -- save state in case we blew up
-                  put ix -- restore our state to how it was
-                  catchError (callback =<< iterM (decodeFromRow needed) opt2)
-                             (\_ -> put failingIx >> throwError err))
-  FailParseWith err -> error ("Leaked beam internal with: " <> show err)
 #else
 newtype Decode (a :: Type) =
   Decode (ExceptT (Either Int (DecodeError Strict))
@@ -690,6 +659,7 @@ runDecode (Decode comp) v tables =
             TypeMismatch   -> Can'tDecodeIntoDemanded tyName ft tables ix' v'
             Won'tFit       -> ValueWon'tFitIntoType tyName ft tables ix' v'
             NotValidJSON   -> JSONError tyName ft tables ix' v'
+#endif
 
 decodeFromRow :: Int -> FromBackendRowF MySQL (Decode a) -> Decode a
 decodeFromRow needed = \case
@@ -697,7 +667,7 @@ decodeFromRow needed = \case
     curr <- currentValue
     case curr of
       Nothing -> throwError . Left $ needed
-      Just val -> case fromFieldStrict val of
+      Just val -> case fromField val of
         Left err -> throwError . Right $ err
         Right x  -> advanceIndex >> callback x
   Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
@@ -716,7 +686,6 @@ decodeFromRow needed = \case
                   catchError (callback =<< iterM (decodeFromRow needed) opt2)
                              (\_ -> put failingIx >> throwError err))
   FailParseWith err -> error ("Leaked beam internal with: " <> show err)
-#endif
 
 currentValue :: Decode (Maybe MySQLValue)
 currentValue = do

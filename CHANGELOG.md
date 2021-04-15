@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0.0
+
+* Reduce the amount of required CPP. 
+
 ## 1.2.3.1
 
 * Remove `temp-db` internal library.
