@@ -7,7 +7,7 @@
 module Database.Beam.MySQL.Extra where
 
 import           Control.Exception.Safe (bracket, throw)
-import           Control.Monad (when, (>=>))
+import           Control.Monad (when)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader (asks)
 import           Data.Foldable (traverse_)
@@ -45,7 +45,7 @@ import           Database.Beam.MySQL.Syntax.Value (MySQLValueSyntax (..))
 import           Database.Beam.Query (SqlDelete (..), SqlInsert (..),
                                       SqlSelect (..), SqlUpdate (..),
                                       runSelectReturningOne)
-import           Database.MySQL.Base (FieldType, MySQLConn,
+import           Database.MySQL.Base (ColumnDef, MySQLConn,
                                       MySQLValue (MySQLText), Query (Query),
                                       execute_, okAffectedRows)
 import           Prelude hiding (head, length, null, read, zip)
@@ -331,12 +331,11 @@ getPkCols conn nam = do
           drainStream
           (liftIO . unfoldrM go)
   where
-    go ::
-      InputStream (Vector (FieldType, MySQLValue)) ->
-      IO (Maybe (Text, InputStream (Vector (FieldType, MySQLValue))))
-    go stream = do
+    go :: (Vector ColumnDef, InputStream (Vector MySQLValue)) ->
+      IO (Maybe (Text, (Vector ColumnDef, InputStream (Vector MySQLValue))))
+    go (env, stream) = do
       res <- read stream
-      pure $ (, stream) <$> (res >>= (!? 0) >>= extractText)
+      pure $ (, (env, stream)) <$> (res >>= (!? 0) >>= extractText)
 
 getAutoIncColumn :: MySQLConn -> Text -> MySQLM (Maybe Text)
 getAutoIncColumn conn nam = do
@@ -350,10 +349,15 @@ getAutoIncColumn conn nam = do
         "LIMIT 1;"
   bracket (acquireStream conn query)
           drainStream
-          (liftIO . fmap ((>>= (!? 0)) >=> extractText) . read)
+          (liftIO . go)
+  where
+    go :: (Vector ColumnDef, InputStream (Vector MySQLValue)) -> IO (Maybe Text)
+    go (_, stream) = do
+      res <- read stream
+      pure $ res >>= (!? 0) >>= extractText
 
-extractText :: (FieldType, MySQLValue) -> Maybe Text
-extractText (_, val) = case val of
+extractText :: MySQLValue -> Maybe Text
+extractText = \case
   MySQLText t -> pure t
   _           -> Nothing
 

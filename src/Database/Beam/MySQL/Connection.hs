@@ -59,7 +59,7 @@ import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
                                       HasSqlQuantifiedEqualityCheck)
 import           Database.Beam.Query.SQL92 (buildSql92Query')
 import           Database.MySQL.Base (ColumnDef, MySQLConn, MySQLValue (..),
-                                      Query (..), columnName, columnType,
+                                      Query (..), columnOrigName, columnType,
                                       execute_, queryVector_, skipToEof)
 import           Prelude hiding (mapM, read)
 import           System.IO.Streams (InputStream, read)
@@ -333,7 +333,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text
+    columnName     :: {-# UNPACK #-} !Text
     } |
   -- | We cannot decode the given SQL type into the demanded Haskell type.
   --
@@ -342,7 +342,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text,
+    columnName     :: {-# UNPACK #-} !Text,
     value          :: {-# UNPACK #-} !Text
     } |
   -- | The SQL value provided by the database does not fit into the
@@ -353,7 +353,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text,
+    columnName     :: {-# UNPACK #-} !Text,
     value          :: {-# UNPACK #-} !Text
     } |
   -- | When parsing leniently, we found a NaN. As the demanded type is allowed
@@ -367,7 +367,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text
+    columnName     :: {-# UNPACK #-} !Text
     } |
   -- | When parsing leniently, we found a negative or positive infinity. As the
   -- demanded type is allowed to vary considerably, we cannot handle this case
@@ -380,7 +380,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text,
+    columnName     :: {-# UNPACK #-} !Text,
     value          :: {-# UNPACK #-} !Text
     } |
   -- | When parsing leniently, we found a value that's too negative to fit into
@@ -393,7 +393,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text,
+    columnName     :: {-# UNPACK #-} !Text,
     value          :: {-# UNPACK #-} !Text
     } |
   -- | When parsing leniently, we found a value that's too large (that is, too
@@ -407,7 +407,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text,
+    columnName     :: {-# UNPACK #-} !Text,
     value          :: {-# UNPACK #-} !Text
     } |
   -- | When parsing leniently, we could not decode a value of the requested type
@@ -420,7 +420,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text,
+    columnName     :: {-# UNPACK #-} !Text,
     value          :: {-# UNPACK #-} !Text
     } |
   -- | There were not enough fields returned by the database to satisfy the
@@ -439,7 +439,7 @@ data ColumnDecodeError =
     demandedType   :: {-# UNPACK #-} !Text,
     sqlType        :: {-# UNPACK #-} !Text,
     tablesInvolved :: !(HashSet Text),
-    colName        :: {-# UNPACK #-} !Text,
+    columnName     :: {-# UNPACK #-} !Text,
     value          :: {-# UNPACK #-} !Text
     }
   deriving stock (
@@ -635,7 +635,7 @@ runDecode (Decode comp) v tables env =
     handleLenient (LenientDecodeError lastIx (DecodeError err typ)) = do
       let ft = toSQLTypeName . columnType $ env V.! lastIx
       let tyName = tyConNameText typ
-      let colName' = Enc.decodeUtf8 . columnName $ env V.! lastIx
+      let colName' = Enc.decodeUtf8 . columnOrigName $ env V.! lastIx
       let v' = pack . show $ v V.! lastIx
       case err of
         SomeStrict err' -> handleStrict . StrictDecodeError lastIx . DecodeError err' $ typ
@@ -648,7 +648,7 @@ runDecode (Decode comp) v tables env =
     handleStrict (StrictDecodeError lastIx (DecodeError err typ)) = do
       let ft = toSQLTypeName . columnType $ env V.! lastIx
       let tyName = tyConNameText typ
-      let colName' = Enc.decodeUtf8 . columnName $ env V.! lastIx
+      let colName' = Enc.decodeUtf8 . columnOrigName $ env V.! lastIx
       let v' = pack . show $ v V.! lastIx
       throw $ case err of
         UnexpectedNull -> FoundUnexpectedNull tyName ft tables colName'
