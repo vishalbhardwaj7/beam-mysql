@@ -10,7 +10,7 @@ import           Data.Functor.Identity (Identity)
 import qualified Data.HashSet as HS
 import           Data.Int (Int64)
 import           Database.Beam.MySQL (ColumnDecodeError (Can'tDecodeIntoDemanded),
-                                      columnIndex, demandedType, runBeamMySQL,
+                                      columnName, demandedType, runBeamMySQL,
                                       sqlType, tablesInvolved, value)
 import           Database.Beam.Query (all_, runSelectReturningOne, select)
 import           Database.MySQL.Base (MySQLConn, ciCharset, ciDatabase, ciHost,
@@ -57,7 +57,7 @@ runTests p = testGroup "Bad schemata" [
           assertFailure "Got a result, but was meant to throw."
         Left err@Can'tDecodeIntoDemanded{} -> do
           assertBool "Contains table name" . HS.member "bad_schema" . tablesInvolved $ err
-          assertEqual "Indicates column" 1 . columnIndex $ err
+          assertEqual "Indicates column" "data" . columnName $ err
           assertEqual "States expected type" "Text" . demandedType $ err
           assertEqual "States SQL type" "MySQL LongLong" . sqlType $ err
           assertEqual "Reports value found" "MySQLInt64 2" . value $ err
@@ -71,7 +71,7 @@ runTests p = testGroup "Bad schemata" [
           assertFailure "Got a result, but was meant to throw."
         Left err@Can'tDecodeIntoDemanded{} -> do
           assertBool "Contains table name" . HS.member "bad_schema_big" . tablesInvolved $ err
-          assertEqual "Indicates column" 2 . columnIndex $ err
+          assertEqual "Indicates column" "field_2" . columnName $ err
           assertEqual "States expected type" "Int64" . demandedType $ err
           assertEqual "States SQL type" "MySQL VarString" . sqlType $ err
           assertEqual "Reports value found" "MySQLText \"bar\"" . value $ err
@@ -85,7 +85,7 @@ runTests p = testGroup "Bad schemata" [
           assertFailure "Got a result, but was meant to throw."
         Left err@Can'tDecodeIntoDemanded{} -> do
           assertBool "Contains table name" . HS.member "bad_schema_nullable" . tablesInvolved $ err
-          assertEqual "IndicatesColumn" 4 . columnIndex $ err
+          assertEqual "Indicates column" "field_4" . columnName $ err
           assertEqual "States expected type" "Double" . demandedType $ err
           assertEqual "States SQL type" "MySQL Long" . sqlType $ err
           assertEqual "Reports value found" "MySQLInt32 15" . value $ err

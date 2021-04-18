@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          beam-mysql
-version:       1.2.3.1
+version:       1.2.4.0
 synopsis:      Connection layer between beam and MySQL/MariaDB
 description:
   Beam driver for MySQL or MariaDB databases, two popular open-source databases.
@@ -70,7 +70,7 @@ common common-test
   build-depends:
     , beam-mysql
     , db
-    , tasty
+    , tasty       ^>=1.4.1
 
 -- Flags
 
@@ -87,23 +87,47 @@ flag with-db
 library
   import:          common-lang
   exposed-modules: Database.Beam.MySQL
-  other-modules:
-    Data.FakeUTC
-    Data.ViaJson
-    Database.Beam.MySQL.Connection
-    Database.Beam.MySQL.Extra
-    Database.Beam.MySQL.FromField
-    Database.Beam.MySQL.Syntax
-    Database.Beam.MySQL.Syntax.DataType
-    Database.Beam.MySQL.Syntax.Delete
-    Database.Beam.MySQL.Syntax.Insert
-    Database.Beam.MySQL.Syntax.Misc
-    Database.Beam.MySQL.Syntax.Render
-    Database.Beam.MySQL.Syntax.Select
-    Database.Beam.MySQL.Syntax.Update
-    Database.Beam.MySQL.Syntax.Value
-    Database.Beam.MySQL.TextHandling
-    Database.Beam.MySQL.Utils
+
+  if flag(lenient)
+    other-modules:
+      Data.FakeUTC
+      Data.ViaJson
+      Database.Beam.MySQL.Connection
+      Database.Beam.MySQL.Extra
+      Database.Beam.MySQL.FromField.DecodeError
+      Database.Beam.MySQL.FromField.Lenient
+      Database.Beam.MySQL.FromField.Strict
+      Database.Beam.MySQL.Syntax
+      Database.Beam.MySQL.Syntax.DataType
+      Database.Beam.MySQL.Syntax.Delete
+      Database.Beam.MySQL.Syntax.Insert
+      Database.Beam.MySQL.Syntax.Misc
+      Database.Beam.MySQL.Syntax.Render
+      Database.Beam.MySQL.Syntax.Select
+      Database.Beam.MySQL.Syntax.Update
+      Database.Beam.MySQL.Syntax.Value
+      Database.Beam.MySQL.TextHandling
+      Database.Beam.MySQL.Utils
+
+  else
+    other-modules:
+      Data.FakeUTC
+      Data.ViaJson
+      Database.Beam.MySQL.Connection
+      Database.Beam.MySQL.Extra
+      Database.Beam.MySQL.FromField.DecodeError
+      Database.Beam.MySQL.FromField.Strict
+      Database.Beam.MySQL.Syntax
+      Database.Beam.MySQL.Syntax.DataType
+      Database.Beam.MySQL.Syntax.Delete
+      Database.Beam.MySQL.Syntax.Insert
+      Database.Beam.MySQL.Syntax.Misc
+      Database.Beam.MySQL.Syntax.Render
+      Database.Beam.MySQL.Syntax.Select
+      Database.Beam.MySQL.Syntax.Update
+      Database.Beam.MySQL.Syntax.Value
+      Database.Beam.MySQL.TextHandling
+      Database.Beam.MySQL.Utils
 
   build-depends:
     , aeson            ^>=1.4.7.1 || ^>=1.5.0.0
@@ -162,9 +186,9 @@ library pool
   exposed-modules: Pool
   build-depends:
     , BoundedChan
-    , lifted-base
-    , monad-control
-    , transformers-base
+    , lifted-base        ^>=0.2.3.12
+    , monad-control      ^>=1.0.2.3
+    , transformers-base  ^>=0.4.5.2
 
   hs-source-dirs:  pool
 
@@ -179,7 +203,7 @@ test-suite generation
   main-is:        Main.hs
   build-depends:
     , aeson
-    , tasty-hunit
+    , tasty-hunit  ^>=0.10.0.3
 
   hs-source-dirs: test/generation
 
@@ -202,11 +226,11 @@ test-suite via-json
   main-is:        Main.hs
   build-depends:
     , aeson
-    , hedgehog
+    , hedgehog        ^>=1.0.5
     , lifted-base
     , pool
     , scientific
-    , tasty-hedgehog
+    , tasty-hedgehog  ^>=1.1.0.0
     , vector
 
   hs-source-dirs: test/via-json
@@ -233,7 +257,7 @@ test-suite unicode
   main-is:        Main.hs
   build-depends:
     , fmt
-    , split
+    , split        ^>=0.2.3.4
     , tasty-hunit
 
   hs-source-dirs: test/unicode

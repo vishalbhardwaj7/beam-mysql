@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0.0
+
+* Reduce the amount of required CPP.
+* Modified `ColumnDecodeError` to indicate the name of the column that caused
+  the error, rather than just the index. 
+
 ## 1.2.3.1
 
 * Remove `temp-db` internal library.
