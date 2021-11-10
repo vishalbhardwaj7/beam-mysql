@@ -19,6 +19,8 @@ import           DB.Lenient (LenientT)
 import qualified DB.Lenient as Lenient
 import           DB.Nullable (NullableT)
 import qualified DB.Nullable as Nullable
+import           DB.NullableMaybe (NullableMaybeT)
+import qualified DB.NullableMaybe as NullableMaybe
 import           DB.PrimaryKey.AutoInc (AutoIncT)
 import qualified DB.PrimaryKey.AutoInc as AutoInc
 import           DB.PrimaryKey.NoAutoInc (NoAutoIncT)
@@ -40,6 +42,7 @@ import           GHC.Generics (Generic)
 
 data TestDB (f :: Type -> Type) = TestDB {
   nullable          :: f (TableEntity NullableT),
+  nullableMaybe     :: f (TableEntity NullableMaybeT),
   viaJson           :: f (TableEntity ViaJSONT),
   bobby             :: f (TableEntity BobbyT),
   unicode           :: f (TableEntity UnicodeT),
@@ -63,6 +66,9 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
       nullable = modifyTableFields $
                   tableModification { Nullable.id = fieldNamed "id",
                                       Nullable.dat = fieldNamed "data" },
+      nullableMaybe = modifyTableFields $
+                  tableModification { NullableMaybe.id = fieldNamed "id",
+                                      NullableMaybe.dat = fieldNamed "data" },
       viaJson = modifyTableFields $
                   tableModification { ViaJSON.id = fieldNamed "id",
                                       ViaJSON.fromBool = fieldNamed "from_bool",
@@ -131,6 +137,7 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
     names :: DatabaseModification (DatabaseEntity MySQL TestDB) MySQL TestDB
     names = (dbModification @_ @MySQL) {
       nullable = setEntityName "nullable",
+      nullableMaybe = setEntityName "nullable",
       viaJson = setEntityName "via_json",
       bobby = setEntityName "bobby",
       unicode = setEntityName "unicode",

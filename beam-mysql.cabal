@@ -164,6 +164,7 @@ library db
     DB.Latin1
     DB.Lenient
     DB.Nullable
+    DB.NullableMaybe
     DB.PrimaryKey.AutoInc
     DB.PrimaryKey.NoAutoInc
     DB.PrimaryKey.None
