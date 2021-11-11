@@ -674,7 +674,7 @@ decodeFromRow needed = \case
   Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
     ix <- get -- save state
     catchAny (callback =<< iterM (decodeFromRow needed) opt1)
-             (\err -> do
+             (\_ -> do
                 failingIx <- get -- save stage in case we blow up again
                 put ix -- restore our state to how it was
                 -- The 'catch-in-catch' here is needed due to the peculiar way
@@ -686,7 +686,7 @@ decodeFromRow needed = \case
                 -- strange false positives regarding NULL parses, we have to
                 -- forward the _first_ error we saw.
                 catchAny (callback =<< iterM (decodeFromRow needed) opt2)
-                         (\_ -> put failingIx >> throw err))
+                         (\errNullable -> put failingIx >> throw errNullable))
   FailParseWith err                                          ->
     error $ "Leaked beam internal with:" <> show err
   where
