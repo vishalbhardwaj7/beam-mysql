@@ -6,7 +6,7 @@ import           Control.Concurrent (getNumCapabilities)
 import qualified Control.Exception.Lifted as LB
 import           Control.Exception.Safe (IOException, bracket, finally)
 import           Control.Monad.IO.Class (liftIO)
-import           DB (noPk, pkAi, pkNoAi, testDB)
+import           DB (noPk, pkAi, pkAi2, pkNoAi, testDB)
 import           DB.PrimaryKey.AutoInc (AutoIncT (AutoIncT))
 import qualified DB.PrimaryKey.AutoInc as AutoInc
 import           DB.PrimaryKey.NoAutoInc (NoAutoIncT (NoAutoIncT))
@@ -102,11 +102,11 @@ autoIncProp' i conn = do
     insertTheRow row =
       runBeamMySQL conn .
       runInsertRowReturning .
-      insert (pkAi testDB) .
+      insert (pkAi2 testDB) .
       insertValues $ [row]
     cleanup :: IO ()
     cleanup =
-      runBeamMySQL conn . runDelete $ delete (pkAi testDB) predicate
+      runBeamMySQL conn . runDelete $ delete (pkAi2 testDB) predicate
     predicate ::
       forall s . (forall s' . AutoIncT (QExpr MySQL s')) -> QExpr MySQL s Bool
     predicate row = AutoInc.id row ==. val_ i

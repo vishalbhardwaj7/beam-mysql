@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name:          beam-mysql
-version:       1.3.0.2
+version:       1.3.0.3
 synopsis:      Connection layer between beam and MySQL/MariaDB
 description:
   Beam driver for MySQL or MariaDB databases, two popular open-source databases.
@@ -161,9 +161,11 @@ library db
     DB.BadSchemaBig
     DB.BadSchemaNullable
     DB.Bobby
+    DB.AltParser
     DB.Latin1
     DB.Lenient
     DB.Nullable
+    DB.NullableMaybe
     DB.PrimaryKey.AutoInc
     DB.PrimaryKey.NoAutoInc
     DB.PrimaryKey.None
@@ -212,6 +214,7 @@ test-suite nullable
   type:           exitcode-stdio-1.0
   main-is:        Main.hs
   build-depends:
+    , pool
     , safe-exceptions
     , tasty-hunit
 
@@ -319,4 +322,18 @@ test-suite leniency
   hs-source-dirs: test/leniency
 
   if (!flag(lenient) || !flag(with-db))
+    buildable: False
+
+test-suite alt-parser
+  import:         common-test
+  type:           exitcode-stdio-1.0
+  main-is:        Main.hs
+  build-depends:
+    , pool
+    , safe-exceptions
+    , tasty-hunit
+
+  hs-source-dirs: test/alt-parser
+
+  if !flag(with-db)
     buildable: False

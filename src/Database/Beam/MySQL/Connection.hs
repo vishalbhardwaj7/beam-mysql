@@ -17,7 +17,7 @@ import           Control.Monad.IO.Class (MonadIO (..))
 import           Control.Monad.RWS.Strict (RWST, evalRWST)
 import           Control.Monad.Reader (MonadReader (ask), ReaderT (..), asks,
                                        runReaderT)
-import           Control.Monad.State.Strict (MonadState (get, put), modify)
+import           Control.Monad.State.Strict (MonadState (get), modify)
 import           Data.Aeson (FromJSON)
 import           Data.ByteString (ByteString)
 import           Data.FakeUTC (FakeUTC)
@@ -672,21 +672,23 @@ decodeFromRow needed = \case
           errBuild ix err
         Right x  -> advanceIndex >> callback x
   Alt (FromBackendRowM opt1) (FromBackendRowM opt2) callback -> do
-    ix <- get -- save state
-    catchAny (callback =<< iterM (decodeFromRow needed) opt1)
-             (\err -> do
-                failingIx <- get -- save stage in case we blow up again
-                put ix -- restore our state to how it was
                 -- The 'catch-in-catch' here is needed due to the peculiar way
                 -- in which beam parses NULLable columns. Essentially, it first
                 -- tries to grab a non-NULL value, then, if it fails, tries to
                 -- unconditionally grab a NULL.
-                --
+    res1 <- catchAny ((pure . Right) =<< iterM (decodeFromRow needed) opt1)
+                      (pure . Left)
+    case res1 of
+      Right r1 -> callback r1
+      Left err1 -> do
+        res2 <- catchAny ((pure . Right) =<< iterM (decodeFromRow  needed) opt2)
+                          (pure . Left)
+        case res2 of
+          Right r2   -> callback r2
                 -- This is encoded as an Alt. Therefore, if we don't want
                 -- strange false positives regarding NULL parses, we have to
                 -- forward the _first_ error we saw.
-                catchAny (callback =<< iterM (decodeFromRow needed) opt2)
-                         (\_ -> put failingIx >> throw err))
+          Left _err2 -> throw err1
   FailParseWith err                                          ->
     error $ "Leaked beam internal with:" <> show err
   where
