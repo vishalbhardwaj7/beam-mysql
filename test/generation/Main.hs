@@ -241,7 +241,7 @@ simpleInsert =
     go = TestT default_ (val_ . Just $ "foo")
 
 simpleInsertSQL :: Maybe Text
-simpleInsertSQL = Just "INSERT INTO `test_table` (id, data) VALUES (DEFAULT, 'foo');"
+simpleInsertSQL = Just "INSERT INTO `test_table` (`id`, `data`) VALUES (DEFAULT, 'foo');"
 
 multiInsert :: SqlInsert MySQL TestT
 multiInsert =
@@ -254,7 +254,7 @@ multiInsert =
       ]
 
 multiInsertSQL :: Maybe Text
-multiInsertSQL = Just "INSERT INTO `test_table` (id, data) VALUES (DEFAULT, 'foo'), (DEFAULT, 'bar');"
+multiInsertSQL = Just "INSERT INTO `test_table` (`id`, `data`) VALUES (DEFAULT, 'foo'), (DEFAULT, 'bar');"
 
 insertEscaping' :: SqlInsert MySQL TestT
 insertEscaping' = insert (_testTestTable testDB) (insertExpressions go)
@@ -265,11 +265,11 @@ insertEscaping' = insert (_testTestTable testDB) (insertExpressions go)
       ]
 
 insertEscapingSQL :: Maybe Text
-insertEscapingSQL = Just "INSERT INTO `test_table` (id, data) VALUES (DEFAULT, 'foo\\\"');"
+insertEscapingSQL = Just "INSERT INTO `test_table` (`id`, `data`) VALUES (DEFAULT, 'foo\\\"');"
 
 escapingInsertJsonSQL :: Maybe Text
 escapingInsertJsonSQL = Just $
-  "INSERT INTO `json_table` (json) " <>
+  "INSERT INTO `json_table` (`json`) " <>
   "VALUES ('\\\"\\'; DROP TABLE students; --\\\"');"
 
 escapingInsertJson :: SqlInsert MySQL JsonT

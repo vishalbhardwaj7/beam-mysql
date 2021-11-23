@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0.3
+
+* Fix error reporting
+* Fix `run-insert-returning` and `generation` tests
+* Add test for error reporting wrt `Alt` parser
+
 ## 1.3.0.2
 
 * Wrap field's names into backticks in the `renderInsert'`

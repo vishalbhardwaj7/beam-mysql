@@ -13,6 +13,8 @@ import           DB.BadSchemaNullable (BadSchemaNullableT)
 import qualified DB.BadSchemaNullable as BadSchemaNullable
 import           DB.Bobby (BobbyT)
 import qualified DB.Bobby as Bobby
+import           DB.AltParser (AltParserT)
+import qualified DB.AltParser as AltParser
 import           DB.Latin1 (Latin1T)
 import qualified DB.Latin1 as Latin1
 import           DB.Lenient (LenientT)
@@ -45,9 +47,11 @@ data TestDB (f :: Type -> Type) = TestDB {
   nullableMaybe     :: f (TableEntity NullableMaybeT),
   viaJson           :: f (TableEntity ViaJSONT),
   bobby             :: f (TableEntity BobbyT),
+  altParser         :: f (TableEntity AltParserT),
   unicode           :: f (TableEntity UnicodeT),
   pkNoAi            :: f (TableEntity NoAutoIncT),
   pkAi              :: f (TableEntity AutoIncT),
+  pkAi2             :: f (TableEntity AutoIncT),
   noPk              :: f (TableEntity NoneT),
   latin1            :: f (TableEntity Latin1T),
   badSchema         :: f (TableEntity BadSchemaT),
@@ -80,6 +84,12 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
                 tableModification { Bobby.id = fieldNamed "id",
                                     Bobby.badText = fieldNamed "bad_text",
                                     Bobby.badText2 = fieldNamed "bad_text2" },
+      altParser = modifyTableFields $
+                tableModification { AltParser.id = fieldNamed "id",
+                                    AltParser.someText = fieldNamed "some_text",
+                                    AltParser.someInt = fieldNamed "some_int",
+                                    AltParser.someDouble = fieldNamed "some_double",
+                                    AltParser.dat = fieldNamed "data" },
       unicode = modifyTableFields $
                   tableModification { Unicode.id = fieldNamed "id",
                                       Unicode.dat = fieldNamed "data" },
@@ -89,6 +99,10 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
       pkAi = modifyTableFields $
                   tableModification { AutoInc.id = fieldNamed "id",
                                       AutoInc.dat = fieldNamed "data" },
+      pkAi2 = modifyTableFields $
+                  tableModification { AutoInc.id = fieldNamed "id",
+                                      AutoInc.dat = fieldNamed "data" },
+
       noPk = modifyTableFields $
                   tableModification { None.id = fieldNamed "id",
                                       None.dat = fieldNamed "data" },
@@ -140,9 +154,11 @@ testDB = defaultDbSettings `withDbModification` fields `withDbModification` name
       nullableMaybe = setEntityName "nullable",
       viaJson = setEntityName "via_json",
       bobby = setEntityName "bobby",
+      altParser = setEntityName "alt_parser",
       unicode = setEntityName "unicode",
       pkNoAi = setEntityName "pk_no_ai",
       pkAi = setEntityName "pk_ai",
+      pkAi2 = setEntityName "pk_ai2",
       noPk = setEntityName "no_pk",
       latin1 = setEntityName "latin1",
       badSchema = setEntityName "bad_schema",

@@ -2,6 +2,18 @@ create database if not exists test;
 
 use test;
 
+create table if not exists alt_parser (
+  id bigint not null primary key auto_increment,
+  some_text varchar(255),
+  some_int bigint,
+  some_double double,
+  data bigint
+);
+
+insert into alt_parser ( some_int, data)
+  select  7, 42 from dual
+  where not exists (select * from alt_parser);
+
 create table if not exists nullable (
   id bigint not null primary key auto_increment,
   data varchar(255)
@@ -40,6 +52,11 @@ create table if not exists pk_ai (
   data varchar(255) not null collate latin1_general_cs
 );
 
+create table if not exists pk_ai2 (
+  id bigint not null primary key auto_increment,
+  data varchar(255) not null collate latin1_general_cs
+);
+
 create table if not exists pk_no_ai (
   id bigint not null primary key,
   data varchar(255) not null collate latin1_general_cs
@@ -58,7 +75,7 @@ create table if not exists latin1 (
 create table if not exists bad_schema (
   id bigint not null primary key,
   data bigint
-); 
+);
 
 insert into bad_schema (id, data)
   select 1, 2 from dual
@@ -113,10 +130,10 @@ create table if not exists lenient (
   viajson_binary varbinary(255) not null
 );
 
-insert into lenient (id, 
-                     int8_varchar, 
-                     int16_varchar, 
-                     int32_varchar, 
+insert into lenient (id,
+                     int8_varchar,
+                     int16_varchar,
+                     int32_varchar,
                      int64_varchar,
                      float_varchar,
                      double_varchar,
