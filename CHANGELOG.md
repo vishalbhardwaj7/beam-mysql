@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0.4
+
+* Fix cabal file's flag  settings
+
 ## 1.3.0.3
 
 * Fix error reporting
