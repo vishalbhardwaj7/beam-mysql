@@ -438,6 +438,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
                       _ -> e
                     VScientific s -> if s == 0 then LastInsertId else e
                     VNull         -> LastInsertId
+                    VNothing      -> LastInsertId
                     _             -> e
                   -- If this is anything else, the only sensible possibility is
                   -- DEFAULT (our generator and beam together guarantee this).
