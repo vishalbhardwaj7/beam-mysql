@@ -6,6 +6,7 @@
 
 module Database.Beam.MySQL.Extra where
 
+import Debug.Trace
 import           Control.Exception.Safe (bracket, throw)
 import           Control.Monad (when)
 import           Control.Monad.IO.Class (liftIO)
@@ -160,10 +161,10 @@ runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
   SqlInsert MySQL table -> MySQLM (Maybe (table Identity))
 runInsertRowReturning stmt = case stmt of
   SqlInsertNoRows -> pure Nothing
-  SqlInsert _ ins -> case renderInsert ins of
+  SqlInsert _ ins -> case trace (show (renderInsert ins)) renderInsert ins of
     Left (RenderError typ ast) -> case typ of
       UnsupportedOperation op -> unsupported op ast ins
-    Right (query, _) -> case ins.insertValues of
+    Right (query, _) -> case trace (show ins.insertValues) ins.insertValues of
       InsertFromSQL sel -> insertIntoSelect sel ins
       InsertSQLExpressions rows -> case length rows of
         0 -> pure Nothing -- should be impossible
@@ -229,7 +230,7 @@ insertRowReturning ins (TableRowExpression v) query@(Query inner) = do
   mAIColumn <- getAutoIncColumn conn ins.tableName.name
   -- Run the insert
   res <- liftIO . execute_ conn $ query
-  case okAffectedRows res of
+  case trace (show (okAffectedRows res)) (okAffectedRows res) of
     -- This means our insert missed for some reason, so we have nothing to give
     -- back.
     0 -> pure Nothing
@@ -398,11 +399,11 @@ buildPostSelect nam fieldVals pkCols mAICol =
     fieldEqExpr :: Text -> MySQLExpressionSyntax -> Maybe MySQLExpressionSyntax
     fieldEqExpr f e = do
       -- if it's not a primary key column, we can ignore it
-      _ <- find (f ==) pkCols
-      rOp <- case (f ==) <$> mAICol of
+      _ <- find (f ==) (trace (show pkCols) pkCols)
+      rOp <- case (f ==) <$> (trace (show mAICol) mAICol) of
                 -- If the autoincrementing column is in our primary key, we have
                 -- more analysis to do.
-                Just True -> pure $ case e of
+                Just True -> pure $ case trace (show e) e of
                   -- If this is either zero, or NULL, the insert will trigger
                   -- autoincrement behaviour as per MySQL documentation. If it's
                   -- anything else, we have to paste a literal.
