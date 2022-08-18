@@ -449,7 +449,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
                 -- key, or this isn't it, just paste the value as-was.
                 _         -> pure e
       let lOp = Field . UnqualifiedField $ f
-      pure . ComparisonOperation CEq Nothing lOp $ rOp
+      pure . ComparisonOperation CEq Nothing lOp $ (trace (show rOp) rOp)
     {-
     fieldEqExpr f e = do
       -- if it's not a primary key column, we ignore it
