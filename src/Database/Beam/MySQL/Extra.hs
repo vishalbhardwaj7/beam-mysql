@@ -411,7 +411,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
                   -- Floating-point does not get included in this analysis,
                   -- since the concept of both 'exact zero' and 'automatic
                   -- increment' makes no sense.
-                  Value v -> case v of
+                  Value v -> case trace (show v) v of
                     VInt8 i       -> case i of
                       0 -> LastInsertId
                       _ -> e
