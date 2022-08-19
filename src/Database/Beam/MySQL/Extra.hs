@@ -6,7 +6,6 @@
 
 module Database.Beam.MySQL.Extra where
 
-import Debug.Trace
 import           Control.Exception.Safe (bracket, throw)
 import           Control.Monad (when)
 import           Control.Monad.IO.Class (liftIO)
@@ -161,10 +160,10 @@ runInsertRowReturning :: forall (table :: (Type -> Type) -> Type) .
   SqlInsert MySQL table -> MySQLM (Maybe (table Identity))
 runInsertRowReturning stmt = case stmt of
   SqlInsertNoRows -> pure Nothing
-  SqlInsert _ ins -> case trace (show (renderInsert ins)) renderInsert ins of
+  SqlInsert _ ins -> case renderInsert ins of
     Left (RenderError typ ast) -> case typ of
       UnsupportedOperation op -> unsupported op ast ins
-    Right (query, _) -> case trace (show ins.insertValues) ins.insertValues of
+    Right (query, _) -> case ins.insertValues of
       InsertFromSQL sel -> insertIntoSelect sel ins
       InsertSQLExpressions rows -> case length rows of
         0 -> pure Nothing -- should be impossible
@@ -230,7 +229,7 @@ insertRowReturning ins (TableRowExpression v) query@(Query inner) = do
   mAIColumn <- getAutoIncColumn conn ins.tableName.name
   -- Run the insert
   res <- liftIO . execute_ conn $ query
-  case trace (show (okAffectedRows res)) (okAffectedRows res) of
+  case okAffectedRows res of
     -- This means our insert missed for some reason, so we have nothing to give
     -- back.
     0 -> pure Nothing
@@ -399,11 +398,11 @@ buildPostSelect nam fieldVals pkCols mAICol =
     fieldEqExpr :: Text -> MySQLExpressionSyntax -> Maybe MySQLExpressionSyntax
     fieldEqExpr f e = do
       -- if it's not a primary key column, we can ignore it
-      _ <- find (f ==) (trace (show pkCols) pkCols)
-      rOp <- case (f ==) <$> (trace (show mAICol) mAICol) of
+      _ <- find (f ==) pkCols
+      rOp <- case (f ==) <$> mAICol of
                 -- If the autoincrementing column is in our primary key, we have
                 -- more analysis to do.
-                Just True -> pure $ case trace (show e) e of
+                Just True -> pure $ case e of
                   -- If this is either zero, or NULL, the insert will trigger
                   -- autoincrement behaviour as per MySQL documentation. If it's
                   -- anything else, we have to paste a literal.
@@ -411,7 +410,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
                   -- Floating-point does not get included in this analysis,
                   -- since the concept of both 'exact zero' and 'automatic
                   -- increment' makes no sense.
-                  Value v -> case trace (show v) v of
+                  Value v -> case v of
                     VInt8 i       -> case i of
                       0 -> LastInsertId
                       _ -> e
@@ -449,7 +448,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
                 -- key, or this isn't it, just paste the value as-was.
                 _         -> pure e
       let lOp = Field . UnqualifiedField $ f
-      pure . ComparisonOperation CEq Nothing lOp $ (trace (show rOp) rOp)
+      pure . ComparisonOperation CEq Nothing lOp $ rOp
     {-
     fieldEqExpr f e = do
       -- if it's not a primary key column, we ignore it
