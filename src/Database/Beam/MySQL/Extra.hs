@@ -6,6 +6,7 @@
 
 module Database.Beam.MySQL.Extra where
 
+import Debug.Trace
 import           Control.Exception.Safe (bracket, throw)
 import           Control.Monad (when)
 import           Control.Monad.IO.Class (liftIO)
@@ -384,7 +385,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
         Nothing -- no quantifier
         fieldsOf
         (Just . FromTable ourName $ Anonymous)
-        (Just onPKVals)
+        (Just $ (trace (show onPKVals) onPKVals))
         Nothing -- no GROUP BY
         Nothing -- no HAVING
     fieldsOf :: MySQLProjectionSyntax
@@ -400,11 +401,11 @@ buildPostSelect nam fieldVals pkCols mAICol =
     fieldEqExpr :: Text -> MySQLExpressionSyntax -> Maybe MySQLExpressionSyntax
     fieldEqExpr f e = do
       -- if it's not a primary key column, we can ignore it
-      _ <- find (f ==) pkCols
-      rOp <- case (f ==) <$> mAICol of
+      _ <- find (f ==) (trace (show pkCols) pkCols)
+      rOp <- case (f ==) <$> (trace (show mAICol) mAICol) of
                 -- If the autoincrementing column is in our primary key, we have
                 -- more analysis to do.
-                Just True -> pure $ case e of
+                Just True -> pure $ case trace (show e) e of
                   -- If this is either zero, or NULL, the insert will trigger
                   -- autoincrement behaviour as per MySQL documentation. If it's
                   -- anything else, we have to paste a literal.
@@ -412,7 +413,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
                   -- Floating-point does not get included in this analysis,
                   -- since the concept of both 'exact zero' and 'automatic
                   -- increment' makes no sense.
-                  Value v -> case v of
+                  Value v -> case trace (show v) v of
                     VInt8 i       -> case i of
                       0 -> LastInsertId
                       _ -> e
@@ -452,7 +453,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
                   Value (VLocalTime v) -> Value (VLocalTime $ stripMilliSeconds v)
                   _ -> e
       let lOp = Field . UnqualifiedField $ f
-      pure . ComparisonOperation CEq Nothing lOp $ rOp
+      pure . ComparisonOperation CEq Nothing lOp $ (trace (show rOp) rOp)
     stripMilliSeconds :: LocalTime -> LocalTime
     stripMilliSeconds curr =
       let x = localTimeToUTC utc curr
