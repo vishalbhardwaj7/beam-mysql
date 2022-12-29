@@ -14,6 +14,8 @@ import           Data.Foldable (traverse_)
 import           Data.Functor.Identity (Identity)
 import           Data.Kind (Type)
 import           Data.Text (Text, pack)
+import           Data.Time (LocalTime, localTimeToUTC, utcToLocalTime, utc,
+                            UTCTime(..), utctDay, utctDayTime)
 import           Data.Text.Lazy (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Vector (Vector, find, foldl1', head, length, mapMaybe,
@@ -446,9 +448,25 @@ buildPostSelect nam fieldVals pkCols mAICol =
                   _       -> LastInsertId
                 -- If we don't have an autoincrementing column in our primary
                 -- key, or this isn't it, just paste the value as-was.
-                _         -> pure e
+                _         -> pure $ case e of
+                  Value (VLocalTime v) -> Value (VLocalTime $ stripMilliSeconds v)
+                  _ -> e
       let lOp = Field . UnqualifiedField $ f
       pure . ComparisonOperation CEq Nothing lOp $ rOp
+    {-- Handled this to query entry with datetime datatypes primary Id.
+        While inserting datetime format, mysql rounds off milliseconds (>= 500000000000) to next second.
+        Added logic to do the same for fetching as well.
+    --}
+    stripMilliSeconds :: LocalTime -> LocalTime
+    stripMilliSeconds curr =
+      let utcCurrentTime = localTimeToUTC utc curr
+          actual = fromEnum $ utctDayTime utcCurrentTime
+          modifyFun = 
+            if actual `rem` 1000000000000 >= 500000000000
+              then (+1)
+              else id
+      in utcToLocalTime utc (UTCTime (utctDay utcCurrentTime) (toEnum $ (modifyFun (actual `div` 1000000000000)) * 1000000000000))
+
     {-
     fieldEqExpr f e = do
       -- if it's not a primary key column, we ignore it
