@@ -449,15 +449,24 @@ buildPostSelect nam fieldVals pkCols mAICol =
                   _       -> LastInsertId
                 -- If we don't have an autoincrementing column in our primary
                 -- key, or this isn't it, just paste the value as-was.
-                _         -> pure $ case e of
+                _         -> pure $ case trace (show e) e of
                   Value (VLocalTime v) -> Value (VLocalTime $ stripMilliSeconds v)
                   _ -> e
       let lOp = Field . UnqualifiedField $ f
       pure . ComparisonOperation CEq Nothing lOp $ (trace (show rOp) rOp)
+    {-- Handled this to query entry with datetime datatypes primary Id.
+        While inserting datetime format, mysql rounds off milliseconds (>= 500000000000) to next second.
+        Added logic to do the same for fetching as well.
+    --}
     stripMilliSeconds :: LocalTime -> LocalTime
     stripMilliSeconds curr =
-      let x = localTimeToUTC utc curr
-      in utcToLocalTime utc (UTCTime (utctDay x) ((toEnum $ ((fromEnum $ utctDayTime $ x) `div` 1000000000000) * 1000000000000)))
+      let utcCurrentTime = localTimeToUTC utc curr
+          actual = fromEnum $ utctDayTime utcCurrentTime
+          modifyFun = 
+            if actual `rem` 1000000000000 >= 500000000000
+              then (+1)
+              else id
+      in utcToLocalTime utc (UTCTime (utctDay utcCurrentTime) (toEnum $ (modifyFun (actual `div` 1000000000000)) * 1000000000000))
 
     {-
     fieldEqExpr f e = do
