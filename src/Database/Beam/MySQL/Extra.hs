@@ -460,12 +460,12 @@ buildPostSelect nam fieldVals pkCols mAICol =
     stripMilliSeconds :: LocalTime -> LocalTime
     stripMilliSeconds curr =
       let utcCurrentTime = localTimeToUTC utc curr
-          actual = fromEnum $ utctDayTime utcCurrentTime
-          modifyFun = 
-            if actual `rem` 1000000000000 >= 500000000000
-              then (+1)
-              else id
-      in utcToLocalTime utc (UTCTime (utctDay utcCurrentTime) (toEnum $ (modifyFun (actual `div` 1000000000000)) * 1000000000000))
+          actual = (fromEnum $ utctDayTime utcCurrentTime) `rem` 1000000000000
+          nominalDiffTime = 
+            if actual >= 500000000000
+              then 1000000000000 - actual
+              else 0 - actual
+      in addLocalTime (toEnum nominalDiffTime) curr
 
     {-
     fieldEqExpr f e = do
