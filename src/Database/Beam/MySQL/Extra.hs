@@ -14,8 +14,7 @@ import           Data.Foldable (traverse_)
 import           Data.Functor.Identity (Identity)
 import           Data.Kind (Type)
 import           Data.Text (Text, pack)
-import           Data.Time (LocalTime, localTimeToUTC, utcToLocalTime, utc,
-                            UTCTime(..), utctDay, utctDayTime)
+import           Data.Time (LocalTime, localTimeToUTC, utc, addLocalTime, utctDayTime)
 import           Data.Text.Lazy (fromStrict, toStrict)
 import           Data.Text.Lazy.Encoding (decodeUtf8, encodeUtf8)
 import           Data.Vector (Vector, find, foldl1', head, length, mapMaybe,
