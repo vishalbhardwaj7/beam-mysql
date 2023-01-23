@@ -10,6 +10,7 @@ import           Database.Beam.MySQL.Syntax.Select (MySQLExpressionSyntax,
                                                     MySQLSelect,
                                                     MySQLTableNameSyntax,
                                                     TableRowExpression (TableRowExpression))
+import           Database.Beam.MySQL.Syntax.Update (FieldUpdate)
 
 -- | Representation of @VALUES@ in an @INSERT@.
 --
@@ -38,11 +39,18 @@ instance IsSql92InsertValuesSyntax MySQLInsertValuesSyntax where
   insertFromSql :: MySQLSelect -> MySQLInsertValuesSyntax
   insertFromSql = InsertFromSQL
 
-data MySQLInsert = InsertStmt {
-  tableName    :: {-# UNPACK #-} !MySQLTableNameSyntax,
-  columns      :: {-# UNPACK #-} !(Vector Text),
-  insertValues :: MySQLInsertValuesSyntax
+data MySQLInsert = InsertStmt 
+  { tableName    :: {-# UNPACK #-} !MySQLTableNameSyntax
+  , columns      :: {-# UNPACK #-} !(Vector Text)
+  , insertValues :: MySQLInsertValuesSyntax
+  , onConflict   :: !(Maybe MySQLInsertOnConflictAction)
   }
+  deriving stock (Eq, Show)
+
+data MySQLInsertOnConflictTarget = MySQLInsertOnConflictAnyTarget
+data MySQLInsertOnConflictAction 
+  = IGNORE
+  | ON_DUPLICATE_KEY_UPDATE !(Vector FieldUpdate)
   deriving stock (Eq, Show)
 
 instance IsSql92InsertSyntax MySQLInsert where
@@ -56,6 +64,5 @@ instance IsSql92InsertSyntax MySQLInsert where
     [Text] ->
     MySQLInsertValuesSyntax ->
     MySQLInsert
-  insertStmt tableName' columns' =
-    InsertStmt tableName'
-               (fromList columns')
+  insertStmt tableName' columns' insertValues' =
+    InsertStmt tableName' (fromList columns') insertValues' Nothing
