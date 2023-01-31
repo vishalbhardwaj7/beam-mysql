@@ -516,10 +516,10 @@ renderInsertValues = \case
 renderOnDuplicateKeyUpdate :: MySQLInsertOnConflictAction -> RenderM Builder
 renderOnDuplicateKeyUpdate action = do
   case action of
-    ON_DUPLICATE_KEY_UPDATE updates -> do
+    UPDATE_ON_DUPLICATE_KEY updates -> do
       updates' <- traverse renderFieldUpdate updates
       pure $ " AS new_values" <> if Data.Vector.length updates' == 0 then mempty else " ON DUPLICATE KEY UPDATE " <> (intersperse ", " . toList $ updates')
-    _                               -> pure ""
+    _                               -> pure mempty
 
 renderUpdate' :: MySQLUpdate -> RenderM Builder
 renderUpdate' upd = do

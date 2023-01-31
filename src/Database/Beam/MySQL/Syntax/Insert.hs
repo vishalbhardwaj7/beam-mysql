@@ -50,7 +50,7 @@ data MySQLInsert = InsertStmt
 data MySQLInsertOnConflictTarget = MySQLInsertOnConflictAnyTarget
 data MySQLInsertOnConflictAction 
   = IGNORE
-  | ON_DUPLICATE_KEY_UPDATE !(Vector FieldUpdate)
+  | UPDATE_ON_DUPLICATE_KEY !(Vector FieldUpdate)
   deriving stock (Eq, Show)
 
 instance IsSql92InsertSyntax MySQLInsert where

@@ -338,7 +338,7 @@ instance Beam.BeamHasInsertOnConflict MySQL where
     MySQLConflictAction $ \table ->
       let QAssignment assignments = makeAssignments table fieldsAliased
           fieldsAliased = changeBeamRep (\(Columnar' (QField _ _ nm)) -> Columnar' (QExpr (\_ -> fieldE (qualifiedField "new_values" nm)))) table
-      in ON_DUPLICATE_KEY_UPDATE $ V.fromList [ FieldUpdate fieldNm expr | (fieldNm, expr) <- assignments]
+      in UPDATE_ON_DUPLICATE_KEY $ V.fromList [FieldUpdate fieldNm expr | (fieldNm, expr) <- assignments]
   onConflictUpdateSetWhere _ _ = error "MySQL does not support UPDATE_SET with WHERE"
 
 -- | Some possible (but predictable) failure modes of this backend.
