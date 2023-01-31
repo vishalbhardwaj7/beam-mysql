@@ -5,6 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Trustworthy         #-}
 {-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE RankNTypes          #-}
 
 module Database.Beam.MySQL.Connection where
 
@@ -18,6 +19,7 @@ import           Control.Monad.RWS.Strict (RWST, evalRWST)
 import           Control.Monad.Reader (MonadReader (ask), ReaderT (..), asks,
                                        runReaderT)
 import           Control.Monad.State.Strict (MonadState (get), modify)
+import           Control.Monad.Writer (execWriter, tell)
 import           Data.Aeson (FromJSON)
 import           Data.ByteString (ByteString)
 import           Data.FakeUTC (FakeUTC)
@@ -35,12 +37,16 @@ import           Data.Vector (Vector)
 import qualified Data.Vector as V
 import           Data.ViaJson (ViaJson)
 import           Data.Word (Word16, Word32, Word64, Word8)
-import           Database.Beam.Backend (BeamBackend (..), BeamSqlBackend,
-                                        BeamSqlBackendSyntax,
-                                        FromBackendRow (..),
-                                        FromBackendRowF (..),
-                                        FromBackendRowM (..), MonadBeam (..))
-import           Database.Beam.Backend.SQL (BeamSqlBackendIsString, SqlNull)
+import           Database.Beam.Backend
+import qualified Database.Beam.Backend.SQL.BeamExtensions as Beam
+import           Database.Beam.Schema.Tables ( Beamable
+                                             , Columnar'(..)
+                                             , DatabaseEntity(..)
+                                             , DatabaseEntityDescriptor(..)
+                                             , TableEntity
+                                             , TableField(..)
+                                             , changeBeamRep )
+import           Database.Beam.Query.Internal
 import           Database.Beam.MySQL.FromField.DecodeError (DecodeError (DecodeError),
                                                             Lenient (IEEEInfinity, IEEENaN, IEEETooBig, IEEETooSmall, SomeStrict, TextCouldNotParse),
                                                             Strict (NotValidJSON, TypeMismatch, UnexpectedNull, Won'tFit))
@@ -55,8 +61,13 @@ import           Database.Beam.MySQL.FromField.Lenient (FromField (fromField))
 import           Database.Beam.MySQL.FromField.Strict (FromField (fromField))
 #endif
 import           Database.Beam.MySQL.Syntax (MySQLSyntax (..))
-import           Database.Beam.Query (HasQBuilder (..), HasSqlEqualityCheck,
-                                      HasSqlQuantifiedEqualityCheck)
+import           Database.Beam.MySQL.Syntax.Insert ( MySQLInsert(InsertStmt)
+                                                    , MySQLInsertOnConflictAction(..)
+                                                    , MySQLInsertOnConflictTarget(..) )
+import           Database.Beam.MySQL.Syntax.Update ( FieldUpdate(FieldUpdate) )
+import           Database.Beam.Query ( SqlInsert(..), SqlInsertValues(..)
+                                     , HasQBuilder(..), HasSqlEqualityCheck
+                                     , HasSqlQuantifiedEqualityCheck)
 import           Database.Beam.Query.SQL92 (buildSql92Query')
 import           Database.MySQL.Base (ColumnDef, MySQLConn, MySQLValue (..),
                                       Query (..), columnOrigName, columnType,
@@ -291,6 +302,44 @@ instance HasSqlEqualityCheck MySQL FakeUTC
 
 -- | @since 1.2.2.0
 instance HasSqlQuantifiedEqualityCheck MySQL FakeUTC
+
+instance Beam.BeamHasInsertOnConflict MySQL where
+  newtype SqlConflictTarget MySQL table = MySQLConflictTarget
+    { unMySQLConflictTarget :: table (QExpr MySQL QInternal) -> MySQLInsertOnConflictTarget }
+  newtype SqlConflictAction MySQL table = MySQLConflictAction
+    { unMySQLConflictAction :: forall s. table (QField s) -> MySQLInsertOnConflictAction }
+
+  insertOnConflict
+    :: forall db table s. Beamable table
+    => DatabaseEntity MySQL db (TableEntity table)
+    -> SqlInsertValues MySQL (table (QExpr MySQL s))
+    -> Beam.SqlConflictTarget MySQL table
+    -> Beam.SqlConflictAction MySQL table
+    -> SqlInsert MySQL table
+  insertOnConflict (DatabaseEntity dt) vals _ action = case vals of
+    SqlInsertValuesEmpty -> SqlInsertNoRows
+    SqlInsertValues vs   -> SqlInsert (dbTableSettings dt) $ 
+      let getFieldName
+            :: forall a
+            .  Columnar' (TableField table) a
+            -> Columnar' (QField QInternal) a
+          getFieldName (Columnar' fd) = Columnar' $ QField False (dbTableCurrentName dt) $ _fieldName fd
+          tableFields = changeBeamRep getFieldName $ dbTableSettings dt
+          tellFieldName _ _ f = tell [f] >> pure f
+          fieldNames = execWriter $ project' (Proxy @AnyType) (Proxy @((), Text)) tellFieldName tableFields
+        in InsertStmt (tableNameFromEntity dt) (V.fromList fieldNames) vs (Just $ unMySQLConflictAction action tableFields)
+
+  anyConflict = MySQLConflictTarget (const MySQLInsertOnConflictAnyTarget)
+  conflictingFields _ = error "MySQL does not support CONFLICT_TARGETS"
+  conflictingFieldsWhere _ _ = error "MySQL does not support CONFLICT_TARGETS with WHERE"
+
+  onConflictDoNothing = MySQLConflictAction (const IGNORE)
+  onConflictUpdateSet makeAssignments = 
+    MySQLConflictAction $ \table ->
+      let QAssignment assignments = makeAssignments table fieldsAliased
+          fieldsAliased = changeBeamRep (\(Columnar' (QField _ _ nm)) -> Columnar' (QExpr (\_ -> fieldE (qualifiedField "new_values" nm)))) table
+      in UPDATE_ON_DUPLICATE_KEY $ V.fromList [FieldUpdate fieldNm expr | (fieldNm, expr) <- assignments]
+  onConflictUpdateSetWhere _ _ = error "MySQL does not support UPDATE_SET with WHERE"
 
 -- | Some possible (but predictable) failure modes of this backend.
 --

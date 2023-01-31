@@ -30,7 +30,7 @@ let
 linuxBuildTools = with super; lib.optionals (!isDarwin) [ mysql57 numactl ];
 dontCheckDarwin =
   if isDarwin then super.haskell.lib.dontCheck else x: x;
-in 
+in
 super.eulerBuild.mkEulerHaskellOverlay self super
   (hself: hsuper: {
     record-dot-preprocessor = self.eulerBuild.fastBuildExternal {

@@ -24,6 +24,7 @@ import           Database.Beam.MySQL.Syntax.DataType (MySQLDataTypeSyntax (..),
                                                       MySQLPrecision (..))
 import           Database.Beam.MySQL.Syntax.Delete (MySQLDelete)
 import           Database.Beam.MySQL.Syntax.Insert (MySQLInsert,
+                                                    MySQLInsertOnConflictAction (..),
                                                     MySQLInsertValuesSyntax (..))
 import           Database.Beam.MySQL.Syntax.Misc (MySQLAggregationSetQuantifierSyntax (..),
                                                   MySQLExtractFieldSyntax (..),
@@ -487,14 +488,23 @@ renderOrdering = \case
 
 renderInsert' :: MySQLInsert -> RenderM Builder
 renderInsert' ins = do
+  let insertBegin = maybe ("INSERT INTO " :: Builder) renderInsertIgnore ins.onConflict
   tableName' <- renderTableName ins.tableName
   insertValues' <- renderInsertValues ins.insertValues
+  onDuplicateKeyUpdate <- maybe (pure "") renderOnDuplicateKeyUpdate ins.onConflict  
   pure $
-    "INSERT INTO " <>
+    insertBegin <>
     tableName' <>
     " " <>
     (bracketWrap . intersperse ", " . toList . fmap (backtickWrap . textUtf8) $ ins.columns) <>
-    insertValues'
+    insertValues' <>
+    onDuplicateKeyUpdate
+
+renderInsertIgnore :: MySQLInsertOnConflictAction -> Builder
+renderInsertIgnore action = do
+  case action of
+    IGNORE -> "INSERT IGNORE INTO "
+    _      -> "INSERT INTO "
 
 renderInsertValues :: MySQLInsertValuesSyntax -> RenderM Builder
 renderInsertValues = \case
@@ -502,6 +512,14 @@ renderInsertValues = \case
     rti' <- traverse renderTableRow rti
     pure $ " VALUES " <> (intersperse ", " . toList . fmap bracketWrap $ rti')
   InsertFromSQL sel -> renderSelect' sel
+
+renderOnDuplicateKeyUpdate :: MySQLInsertOnConflictAction -> RenderM Builder
+renderOnDuplicateKeyUpdate action = do
+  case action of
+    UPDATE_ON_DUPLICATE_KEY updates -> do
+      updates' <- traverse renderFieldUpdate updates
+      pure $ " AS new_values" <> if Data.Vector.length updates' == 0 then mempty else " ON DUPLICATE KEY UPDATE " <> (intersperse ", " . toList $ updates')
+    _                               -> pure mempty
 
 renderUpdate' :: MySQLUpdate -> RenderM Builder
 renderUpdate' upd = do
