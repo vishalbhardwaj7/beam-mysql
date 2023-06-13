@@ -16,7 +16,8 @@ import           Database.Beam.Backend.SQL (IsSql92AggregationExpressionSyntax (
                                             IsSql92SelectTableSyntax (..),
                                             IsSql92TableNameSyntax (..),
                                             IsSql92TableSourceSyntax (..),
-                                            IsSql99ConcatExpressionSyntax (..))
+                                            IsSql99ConcatExpressionSyntax (..),
+                                            IsSql92AggregationIndexHintsSyntax (..))
 import           Database.Beam.MySQL.Syntax.DataType (MySQLDataTypeSyntax)
 import           Database.Beam.MySQL.Syntax.Misc (MySQLAggregationSetQuantifierSyntax,
                                                   MySQLExtractFieldSyntax,
@@ -40,9 +41,25 @@ instance IsSql92OrderingSyntax MySQLOrderingSyntax where
   descOrdering :: MySQLExpressionSyntax -> MySQLOrderingSyntax
   descOrdering = DescOrdering
 
+data MySQLAggregationSetIndexHintsSyntax =
+  IndexHintsForce MySQLExpressionSyntax |
+  IndexHintsUse MySQLExpressionSyntax
+  deriving stock (Eq, Show)
+
+instance IsSql92AggregationIndexHintsSyntax MySQLAggregationSetIndexHintsSyntax where
+  type Sql92AggregationIndexHintsSyntax MySQLAggregationSetIndexHintsSyntax =
+    MySQLExpressionSyntax
+  {-# INLINABLE setIndexForce #-}
+  setIndexForce :: MySQLExpressionSyntax -> MySQLAggregationSetIndexHintsSyntax
+  setIndexForce = IndexHintsForce
+  {-# INLINABLE setIndexUse #-}
+  setIndexUse :: MySQLExpressionSyntax -> MySQLAggregationSetIndexHintsSyntax
+  setIndexUse = IndexHintsUse
+
 data MySQLSelectTableSyntax =
   SelectTableStatement {
     quantifier :: !(Maybe MySQLAggregationSetQuantifierSyntax),
+    indexHints :: !(Maybe Text),
     projection :: {-# UNPACK #-} !MySQLProjectionSyntax,
     from       :: !(Maybe MySQLFromSyntax),
     wher       :: !(Maybe MySQLExpressionSyntax),
@@ -80,9 +97,12 @@ instance IsSql92SelectTableSyntax MySQLSelectTableSyntax where
     MySQLGroupingSyntax
   type Sql92SelectTableSetQuantifierSyntax MySQLSelectTableSyntax =
     MySQLAggregationSetQuantifierSyntax
+  type Sql92SelectTableSetIndexHintsSyntax MySQLSelectTableSyntax =
+    MySQLAggregationSetIndexHintsSyntax
   {-# INLINABLE selectTableStmt #-}
   selectTableStmt ::
     Maybe MySQLAggregationSetQuantifierSyntax ->
+    Maybe Text ->
     MySQLProjectionSyntax ->
     Maybe MySQLFromSyntax ->
     Maybe MySQLExpressionSyntax ->
