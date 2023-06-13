@@ -26,8 +26,8 @@ overrides:
     source: github
     owner: Chaitanya-nair
     repo: beam
-    commit: 5d9583f1b1fad92f7a6ac705f51a5e26b8808db1
-    sha256: 08lq0f7j6dd1jfgd26mi14azl4v35my0bqr3qrx7bh8abxs9g802
+    commit: 399280ac0f3d15fd0ae4c1ebcdf42e077ba9c17c
+    sha256: 0aldgw3csqiwmrb2mv5ghzahj7lds0q175xly8cshp2swph3g5r0
     packages:
       beam-core: {}
       beam-migrate: {}

@@ -15,8 +15,8 @@ let
   };
 
   beam-repo = builtins.fetchTarball {
-    url = "https://github.com/Chaitanya-nair/beam/archive/5d9583f1b1fad92f7a6ac705f51a5e26b8808db1.tar.gz";
-    sha256 = "08lq0f7j6dd1jfgd26mi14azl4v35my0bqr3qrx7bh8abxs9g802";
+    url = "https://github.com/Chaitanya-nair/beam/archive/399280ac0f3d15fd0ae4c1ebcdf42e077ba9c17c.tar.gz";
+    sha256 = "0aldgw3csqiwmrb2mv5ghzahj7lds0q175xly8cshp2swph3g5r0";
   };
   beam-core-path = "${beam-repo}/beam-core";
   beam-migrate-path = "${beam-repo}/beam-migrate";
