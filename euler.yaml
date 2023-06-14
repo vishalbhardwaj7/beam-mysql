@@ -14,7 +14,7 @@ dependencies:
     revision: aa20a46b6ae5d638c23fa009fb1dd9b07727ffa2
   beam:
     branch: master
-    revision: d36b29726570b6c5d228bee44d169282fe99ebdb
+    revision: 4bfeb46746212c6b54983844a3acd37853430065
 
 overrides:
   record-dot-preprocessor:
@@ -67,4 +67,3 @@ custom-nix:
       dontCheckDarwin (super.haskell.lib.addBuildTools (
     right: |-
       ) linuxBuildTools)
-

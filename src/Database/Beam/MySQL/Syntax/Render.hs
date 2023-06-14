@@ -56,6 +56,7 @@ import           Mason.Builder (BuilderFor, LazyByteStringBackend, byteString,
                                 word16Dec, word32Dec, word64Dec, word8Dec,
                                 wordDec)
 import           Prelude hiding (length)
+import qualified Data.Text.Encoding as TE
 
 newtype RenderErrorType = UnsupportedOperation Text
   deriving stock (Show)
@@ -119,6 +120,7 @@ renderSelect' sel = do
         Nothing  -> " LIMIT " <> lim
         Just off -> " LIMIT " <> off <> ", " <> lim
 
+
 renderSelectTable :: MySQLSelectTableSyntax -> RenderM Builder
 renderSelectTable sts = case sts of
   UnionTablesAll{}      -> do
@@ -135,6 +137,7 @@ renderSelectTable sts = case sts of
     q <- traverse renderSetQuantifier sts.quantifier
     proj <- renderProjection sts.projection
     from' <- traverse renderFrom sts.from
+    indHints <- maybe (pure "") renderIndexHints sts.indexHints
     wher' <- traverse renderExpr sts.wher
     grouping' <- traverse renderGrouping sts.grouping
     having' <- traverse renderExpr sts.having
@@ -143,6 +146,7 @@ renderSelectTable sts = case sts of
       foldMap (" " <>) q <>
       proj <>
       foldMap (" FROM " <>) from' <>
+      indHints <>
       foldMap (" WHERE " <>) wher' <>
       foldMap (" GROUP BY " <>) grouping' <>
       foldMap (" HAVING " <>) having'
@@ -151,6 +155,10 @@ renderSetQuantifier :: MySQLAggregationSetQuantifierSyntax -> RenderM Builder
 renderSetQuantifier = pure . \case
   SetDistinct -> "DISTINCT"
   SetAll      -> "ALL"
+
+-- TODO: Test for all index hints
+renderIndexHints :: Text -> RenderM Builder
+renderIndexHints str = pure $ " FORCE INDEX ( " <> (byteString $ TE.encodeUtf8 str) <> " )"
 
 renderProjection :: MySQLProjectionSyntax -> RenderM Builder
 renderProjection (ProjectExpressions es) = do

@@ -380,6 +380,7 @@ buildPostSelect nam fieldVals pkCols mAICol =
     selTable :: MySQLSelectTableSyntax
     selTable =
       SelectTableStatement
+        Nothing
         Nothing -- no quantifier
         fieldsOf
         (Just . FromTable ourName $ Anonymous)
