@@ -14,15 +14,6 @@ let
     ];
   };
 
-  beam-repo = builtins.fetchTarball {
-    url = "https://github.com/Chaitanya-nair/beam/archive/399280ac0f3d15fd0ae4c1ebcdf42e077ba9c17c.tar.gz";
-    sha256 = "0aldgw3csqiwmrb2mv5ghzahj7lds0q175xly8cshp2swph3g5r0";
-  };
-  beam-core-path = "${beam-repo}/beam-core";
-  beam-migrate-path = "${beam-repo}/beam-migrate";
-  beam-sqlite-path = "${beam-repo}/beam-sqlite";
-  beam-postgres-path = "${beam-repo}/beam-postgres";
-
   bytestring-lexing-repo = builtins.fetchTarball {
     url = "https://github.com/juspay/bytestring-lexing/archive/0a46db1139011736687cb50bbd3877d223bcb737.tar.gz";
     sha256 = "1jrwhlp8xs4m21xfr843278j3i7h4sxyjpq67l6lzc36pqan9zlz";
@@ -48,18 +39,6 @@ super.eulerBuild.mkEulerHaskellOverlay self super
         ver = "0.2.7";
         sha256 = "0dyn5wpn0p4sc1yw4zq9awrl2aa3gd3jamllfxrg31v3i3l6jvbw";
       } { });
-    };
-    beam-core = self.eulerBuild.fastBuildExternal {
-      drv = super.haskell.lib.unmarkBroken (hself.callCabal2nix "beam-core" beam-core-path { });
-    };
-    beam-migrate = self.eulerBuild.fastBuildExternal {
-      drv = super.haskell.lib.unmarkBroken (hself.callCabal2nix "beam-migrate" beam-migrate-path { });
-    };
-    beam-sqlite = self.eulerBuild.fastBuildExternal {
-      drv = super.haskell.lib.unmarkBroken (hself.callCabal2nix "beam-sqlite" beam-sqlite-path { });
-    };
-    beam-postgres = self.eulerBuild.fastBuildExternal {
-      drv = super.haskell.lib.unmarkBroken (hself.callCabal2nix "beam-postgres" beam-postgres-path { });
     };
     bytestring-lexing = self.eulerBuild.fastBuildExternal {
       drv = super.haskell.lib.unmarkBroken (hself.callCabal2nix "bytestring-lexing" bytestring-lexing-path { });

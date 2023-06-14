@@ -1,5 +1,24 @@
 {
   "nodes": {
+    "beam": {
+      "inputs": {
+        "euler-build": [
+          "euler-build"
+        ]
+      },
+      "locked": {
+        "lastModified": 1686732869,
+        "narHash": "sha256-NJ1CfZCboTZ3MEsxp57PoEz/X6tx8CEK/fz+R+JAbjk=",
+        "owner": "juspay",
+        "repo": "beam",
+        "rev": "4bfeb46746212c6b54983844a3acd37853430065",
+        "type": "github"
+      },
+      "original": {
+        "id": "beam",
+        "type": "indirect"
+      }
+    },
     "euler-build": {
       "inputs": {
         "flake-utils": "flake-utils",
@@ -72,6 +91,7 @@
     },
     "root": {
       "inputs": {
+        "beam": "beam",
         "euler-build": "euler-build"
       }
     },

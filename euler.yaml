@@ -12,27 +12,15 @@ dependencies:
   euler-build:
     branch: master
     revision: aa20a46b6ae5d638c23fa009fb1dd9b07727ffa2
-  # beam:
-  #   branch: master
-  #   revision: d36b29726570b6c5d228bee44d169282fe99ebdb
+  beam:
+    branch: master
+    revision: 4bfeb46746212c6b54983844a3acd37853430065
 
 overrides:
   record-dot-preprocessor:
     version: 0.2.7
     sha256: 0dyn5wpn0p4sc1yw4zq9awrl2aa3gd3jamllfxrg31v3i3l6jvbw
     source: hackage
-
-  beam:
-    source: github
-    owner: Chaitanya-nair
-    repo: beam
-    commit: 399280ac0f3d15fd0ae4c1ebcdf42e077ba9c17c
-    sha256: 0aldgw3csqiwmrb2mv5ghzahj7lds0q175xly8cshp2swph3g5r0
-    packages:
-      beam-core: {}
-      beam-migrate: {}
-      beam-sqlite: {}
-      beam-postgres: {}
 
   bytestring-lexing:
     source: github
@@ -79,7 +67,3 @@ custom-nix:
       dontCheckDarwin (super.haskell.lib.addBuildTools (
     right: |-
       ) linuxBuildTools)
-
-development:
-  cabal-project:
-    beam: ../beam
