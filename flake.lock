@@ -32,7 +32,7 @@
         "rev": "aa20a46b6ae5d638c23fa009fb1dd9b07727ffa2",
         "revCount": 27,
         "type": "git",
-        "url": "ssh://git@bitbucket.org/juspay/euler-build"
+        "url": "ssh://git@ssh.bitbucket.juspay.net/jbiz/euler-build"
       },
       "original": {
         "id": "euler-build",
