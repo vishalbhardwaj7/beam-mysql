@@ -30,10 +30,10 @@ overrides:
     sha256: 1jrwhlp8xs4m21xfr843278j3i7h4sxyjpq67l6lzc36pqan9zlz
   mysql-haskell:
     source: github
-    owner: juspay
+    owner: aravindgopall
     repo: mysql-haskell
-    commit: 788022d65538db422b02ecc0be138b862d2e5cee
-    sha256: 030qq1hgh15zkwa6j6x568d248iyfaw5idj2hh2mvb7j8xd1l4lv
+    commit: 55348ea51ad1070d951f35408ebc391dbbf0ec75
+    sha256: 0f00dmhpbqm5hy76nrz9mzz7nnrxm2ybrmv23ag9bbzcxxjr4p2q
   binary-parsers: {}
   wire-streams: {}
   mason:

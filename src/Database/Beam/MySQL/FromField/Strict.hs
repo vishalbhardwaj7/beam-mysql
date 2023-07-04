@@ -3,7 +3,7 @@
 
 module Database.Beam.MySQL.FromField.Strict where
 
-import           Data.Aeson (FromJSON, decodeStrict)
+import           Data.Aeson (Value, FromJSON(..), decodeStrict)
 import           Data.Bits (Bits, toIntegralSized, zeroBits)
 import           Data.ByteString (ByteString)
 import           Data.FakeUTC (FakeUTC (FakeUTC))
@@ -197,12 +197,22 @@ instance (Typeable a, FromJSON a) => FromField (ViaJson a) where
     MySQLText v -> case decodeStrict . encodeUtf8 . decodeText $ v of
       Nothing -> Left . DecodeError NotValidJSON $ tyCon @a
       Just x  -> pure . ViaJson $ x
+    MySQLJSON bs -> case decodeStrict bs of
+      Nothing -> Left . DecodeError NotValidJSON $ tyCon @a
+      Just x -> pure . ViaJson $ x
     v -> handleNullOrMismatch v
 
 instance FromField FakeUTC where
   {-# INLINABLE fromField #-}
   fromField = fmap (FakeUTC . localTimeToUTC utc) . fromField
 
+instance FromField Value where
+  {-# INLINABLE fromField #-}
+  fromField = \case
+    MySQLJSON bs -> case decodeStrict bs of
+      Nothing -> Left . DecodeError NotValidJSON $ tyCon @Value
+      Just x -> pure x
+    v -> handleNullOrMismatch v
 -- Helpers
 
 handleNullOrMismatch :: forall (a :: Type) .
