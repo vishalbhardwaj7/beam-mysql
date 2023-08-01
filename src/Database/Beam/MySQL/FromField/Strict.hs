@@ -197,9 +197,9 @@ instance (Typeable a, FromJSON a) => FromField (ViaJson a) where
     MySQLText v -> case decodeStrict . encodeUtf8 . decodeText $ v of
       Nothing -> Left . DecodeError NotValidJSON $ tyCon @a
       Just x  -> pure . ViaJson $ x
-    MySQLJSON bs -> case decodeStrict bs of
-      Nothing -> Left . DecodeError NotValidJSON $ tyCon @a
-      Just x -> pure . ViaJson $ x
+    -- MySQLJSON bs -> case decodeStrict bs of
+    --   Nothing -> Left . DecodeError NotValidJSON $ tyCon @a
+    --   Just x -> pure . ViaJson $ x
     v -> handleNullOrMismatch v
 
 instance FromField FakeUTC where
@@ -209,9 +209,9 @@ instance FromField FakeUTC where
 instance FromField Value where
   {-# INLINABLE fromField #-}
   fromField = \case
-    MySQLJSON bs -> case decodeStrict bs of
-      Nothing -> Left . DecodeError NotValidJSON $ tyCon @Value
-      Just x -> pure x
+    -- MySQLJSON bs -> case decodeStrict bs of
+    --   Nothing -> Left . DecodeError NotValidJSON $ tyCon @Value
+    --   Just x -> pure x
     v -> handleNullOrMismatch v
 -- Helpers
 
